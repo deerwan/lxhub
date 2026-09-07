@@ -1,8 +1,12 @@
+# 如需开启定时爬取，将下方 on: 块恢复为以下内容即可：
+#
+# on:
+#   schedule:
+#     - cron: "0 1 * * *"   # 每天 UTC 01:00（北京时间 09:00）爬一次
+#   workflow_dispatch: {}
 name: scheduled-crawl
 
 on:
-  schedule:
-    - cron: "0 1 * * *"   # 每天 UTC 01:00（北京时间 09:00）爬一次
   workflow_dispatch: {}
 
 permissions:

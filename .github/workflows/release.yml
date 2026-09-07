@@ -51,6 +51,10 @@ jobs:
           cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 私有仓库的镜像默认也是私有的，加上这两行注解即可让镜像对所有人可见
+          annotations: |
+            org.opencontainers.image.vendor=LXHub
+            pkg.manifest.publish.visibility=public
 
   release:
     needs: docker
