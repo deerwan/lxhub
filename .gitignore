@@ -1,0 +1,45 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# ---------- 虚拟环境 ----------
+.venv/
+venv/
+env/
+
+# ---------- 运行时数据 ----------
+# SQLite 数据库及 WAL/SHM 附属文件，每次爬取都会变化
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# ---------- 本地导出 ----------
+# 注意：仓库根目录的 export.json 由 CI 定时生成并提交，
+# 用于 GitHub Pages 静态站，不要在这里忽略它（否则 workflow 的 git add 会失败）。
+# 手动导出请写到其他路径，例如：python main.py export --out /tmp/export.json
+site/
+
+# ---------- 系统与编辑器 ----------
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+
+# ---------- IDE ----------
+.idea/
+.vscode/
+.codebuddy/
+
+# ---------- 环境变量 ----------
+.env
+.env.*
+!.env.example
+
+# ---------- 日志 ----------
+*.log

@@ -1,0 +1,25 @@
+{
+  "db_path": "data/lxhub.db",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "github_token": "",
+  "keywords": [
+    "lx 音源", "洛雪 音源", "lx-music 音源", "lx music 自定义源",
+    "lx-music-source", "lxmusic", "洛雪音乐 音源", "lx source",
+    "lx音乐源", "洛雪音乐 源", "lx-music-desktop", "lx-music-mobile",
+    "lx source js", "lx 源脚本", "洛雪音源js"
+  ],
+  "seed_repos": ["ZxwyWebSite/lx-source", "lyswhut/lx-music-desktop", "lyswhut/lx-music-mobile"],
+  "seed_urls": [],
+  "max_repos_per_keyword": 20,
+  "max_repos_total": 60,
+  "max_files_per_repo": 40,
+  "max_file_bytes": 1500000,
+  "request_timeout": 15,
+  "concurrency": 8,
+  "check_interval_hours": 12,
+  "crawl_interval_hours": 24,
+  "mirror_prefixes": [
+    {"name": "gh1.lhl.one", "prefix": "https://gh1.lhl.one/", "hosts": ["github.com", "githubusercontent.com", "github.io"]}
+  ]
+}
