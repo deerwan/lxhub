@@ -4,25 +4,42 @@ function fmtElapsed(s){
   return m > 0 ? `${m} 分 ${sec} 秒` : `${sec} 秒`;
 }
 
+// 后台只暴露日常需要调整的项；其余（种子仓库、并发、超时、上限等）
+// 属于部署期参数，留在 config.json / 环境变量里，避免表单过长、误改。
 const ADMIN_FIELDS = [
+  ["_sec1", "收录来源", "section"],
   ["github_token", "GitHub Token（可选；留空则不修改，沿用启动环境变量）", "password"],
   ["keywords", "关键词（每行一个）", "lines"],
   ["seed_repos", "种子仓库（每行一个：owner/repo）", "lines"],
-  ["seed_urls", "种子链接（每行一个）", "lines"],
+  ["mirror_prefixes", "加速前缀（每行一个 URL，例：https://gh1.lhl.one/）。复制 / 导出链接时会自动拼在前面；留空则不启用", "prefixes"],
+
+  ["_sec2", "爬取", "section"],
   ["max_repos_per_keyword", "每关键词最多仓库数", "number"],
   ["max_repos_total", "仓库总数上限", "number"],
-  ["max_files_per_repo", "每仓库最多文件数", "number"],
-  ["max_file_bytes", "单文件字节上限", "number"],
-  ["request_timeout", "请求超时(秒)", "number"],
   ["concurrency", "并发数", "number"],
-  ["check_interval_hours", "复检间隔(小时)", "number"],
-  ["crawl_interval_hours", "爬取间隔(小时)", "number"],
-  ["mirror_prefixes", "加速前缀（每行一个 URL，例如 https://gh.example.com/）", "prefixes"],
+  ["request_timeout", "请求超时(秒)", "number"],
+
+  ["_sec3", "前台", "section"],
   ["show_update_button", "前台首页显示「更新」按钮与任务进度（关闭后：前台不显示任何任务入口与进度，只能在 /admin 触发和查看）", "bool"],
+
+  ["_sec4", "定时任务", "section"],
+  ["crawl_interval_hours", "全量爬取间隔（小时）", "number"],
+  ["check_interval_hours", "可用性复检间隔（小时）", "number"],
 ];
 
+// 后台表单是否已成功载入服务端配置。
+// 未载入就点保存会把所有字段当空值提交，等于清空配置，必须先拦截。
+let ADMIN_FORM_LOADED = false;
+
+function fmtPrefix(p){
+  // 后台只关心 URL；名称由后端从域名推导，hosts 属于 config.json 级配置
+  return typeof p === "string" ? p : ((p && p.prefix) || "");
+}
+
 function buildAdminForm(){
+  ADMIN_FORM_LOADED = false;
   $("#adminForm").innerHTML = ADMIN_FIELDS.map(([k, label, type]) => {
+    if(type === "section") return `<div class="af-sec">${esc(label)}</div>`;
     const area = type === "lines" || type === "json" || type === "prefixes";
     if(type === "bool"){
       return `<div class="full"><label class="af-bool"><input type="checkbox" id="af_${k}"> <span>${esc(label)}</span></label></div>`;
@@ -53,9 +70,7 @@ function fillAdminForm(cfgResp){
       continue;
     }
     if(type === "prefixes"){
-      el.value = (val || [])
-        .map(p => typeof p === "string" ? p : ((p && p.prefix) || ""))
-        .filter(Boolean).join("\n");
+      el.value = (val || []).map(fmtPrefix).filter(Boolean).join("\n");
       continue;
     }
     if(type === "lines") val = (val || []).join("\n");
@@ -63,9 +78,14 @@ function fillAdminForm(cfgResp){
     else val = (val ?? "");
     el.value = val;
   }
+  ADMIN_FORM_LOADED = true;
 }
 
 async function saveAdmin(){
+  if(!ADMIN_FORM_LOADED){
+    toast("配置尚未载入，保存已取消（避免清空配置）");
+    return false;
+  }
   const body = {};
   for(const [k, , type] of ADMIN_FIELDS){
     const el = $("#af_" + k); if(!el) continue;
@@ -73,12 +93,8 @@ async function saveAdmin(){
     if(type === "bool"){ body[k] = !!el.checked; continue; }
     if(type === "lines"){ body[k] = raw ? raw.split(/\n+/).map(s => s.trim()).filter(Boolean) : []; continue; }
     if(type === "prefixes"){
-      body[k] = raw ? raw.split(/\n+/).map(s => {
-        let u = s.trim();
-        // 只填域名时自动补尾斜杠，避免前缀与原链接拼接后破损
-        if(u && !u.endsWith("/") && !u.endsWith("=")) u += "/";
-        return u;
-      }).filter(Boolean) : [];
+      // 只提交 URL 字符串；补尾斜杠、推导名称等交给后端 _norm_mirror 统一处理
+      body[k] = raw ? raw.split(/\n+/).map(s => s.trim()).filter(Boolean) : [];
       continue;
     }
     else if(type === "json"){
@@ -106,7 +122,7 @@ function adminApp(){
   return {
     authed: false,
     user: "", pass: "", err: "", busy: false, taskBusy: false,
-    stats: {total:"—", alive:"—", valid:"—", lastCrawl:"—"},
+    stats: {total:"—", alive:"—", valid:"—", lastCrawl:"—", lastCrawlFull:""},
     prog: {running:false, title:"", msg:"", elapsed:"", pct:0, indet:false, stats:"", logs:""},
     _timer: null,
 
@@ -142,7 +158,10 @@ function adminApp(){
         this.stats.alive = s.stats.alive;
         this.stats.valid = s.stats.valid;
         const lc = s.last_crawl;
-        this.stats.lastCrawl = lc ? (lc.finished_at || lc.started_at || "—") : "—";
+        const when = lc ? (lc.finished_at || lc.started_at || "") : "";
+        const rel = fmtRel(when);
+        this.stats.lastCrawl = rel.t;          // 「3 小时前」这类短文本，避免溢出
+        this.stats.lastCrawlFull = rel.full;   // 完整时间放 title
         // 打开后台时若已有任务在跑，自动接上进度显示
         if(s.busy && !this._timer) this.startWatch();
       }catch(e){}

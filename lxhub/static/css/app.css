@@ -222,6 +222,9 @@ textarea:-webkit-autofill,select:-webkit-autofill{
 .admin-form .af-bool{display:flex;align-items:center;gap:8px;font-size:13px;
   color:var(--text);cursor:pointer;margin:6px 0}
 .admin-form .af-bool input[type=checkbox]{width:auto;margin:0}
+.admin-form .af-sec{grid-column:1/-1;font-size:12px;font-weight:600;color:var(--mute);
+  letter-spacing:.04em;padding:14px 0 2px;border-top:1px solid var(--line)}
+.admin-form .af-sec:first-child{border-top:0;padding-top:0}
 
 /* ---------- 弹窗 ---------- */
 dialog{background:var(--surface);color:var(--text);border:1px solid var(--line);

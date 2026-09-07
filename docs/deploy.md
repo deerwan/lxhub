@@ -106,6 +106,16 @@ docker run -e GITHUB_TOKEN=ghp_xxx \
 #   - LXH_ADMIN_PASS=你的后台密码    # 后台密码（务必设置，否则后台不启用）
 ```
 
+**本地 / 非容器部署**：不必每次 `export`，直接写进项目根目录的 `.env` 即可，
+效果与上面完全等价（进程环境变量优先级更高，不会被 `.env` 覆盖）：
+
+```bash
+# .env（该文件已被 .gitignore 忽略）
+GITHUB_TOKEN=ghp_xxx
+LXH_ADMIN_USER=admin
+LXH_ADMIN_PASS=你的后台密码
+```
+
 行为说明：
 - **未设置 `LXH_ADMIN_PASS`**：网页后台接口返回 403，但 `/api/crawl`、`/api/check` 等保持公开（兼容「不设密码也能跑」的极简部署）。
 - **已设置**：后台所有写操作（含触发爬取/复检）都需要先登录（`账户名 + 密码`）拿 Bearer token，账户名或密码任一不符均返回 401。

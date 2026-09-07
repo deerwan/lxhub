@@ -10,7 +10,7 @@ import time
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -24,6 +24,36 @@ from .progress import Progress
 cfg = load_config()
 db = DB(cfg.db_path)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# ---------- HTML 静态资源缓存治理 ----------
+# HTML 里对 js/css 的引用带上文件 mtime 作为版本号（?v=...），
+# 文件一变 URL 就变，浏览器自然会拉新版本，不必手动改版本号。
+# HTML 本身回 no-cache，保证每次都能拿到引用了新 URL 的页面。
+_HTML_CACHE: dict[str, str] = {}
+
+
+def _load_html(name: str) -> str:
+    html = (STATIC_DIR / name).read_text(encoding="utf-8")
+
+    def _repl(m: re.Match) -> str:
+        path = m.group(1)
+        try:
+            ver = int((STATIC_DIR / path).stat().st_mtime)
+        except OSError:
+            ver = 0
+        return f"/static/{path}?v={ver}"
+
+    return re.sub(r"/static/([\w./-]+\.(?:js|css))", _repl, html)
+
+
+def _html(name: str) -> Response:
+    if name not in _HTML_CACHE:
+        try:
+            _HTML_CACHE[name] = _load_html(name)
+        except OSError:
+            return Response("页面缺失", status_code=500)
+    return Response(_HTML_CACHE[name], media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
 
 # ---------- 后台管理（可选，由环境变量 LXH_ADMIN_USER / LXH_ADMIN_PASS 启用） ----------
 ADMIN_USER = os.environ.get("LXH_ADMIN_USER", "admin")
@@ -63,6 +93,42 @@ EDITABLE = {
     "mirror_prefixes": list,
     "show_update_button": _to_bool,
 }
+
+# 后台表单只填一个 URL，不填生效域名时的默认值：
+# 本项目收录的链接均来自 GitHub，加速前缀也只对这些镜像站有意义，
+# 不兜底的话前缀会被拼到任何链接上（万一混入非 GitHub 链接就打不开了）。
+DEFAULT_MIRROR_HOSTS = ("github.com", "githubusercontent.com", "github.io")
+
+
+def _norm_mirror(v):
+    """归一化一条加速前缀。
+
+    后台只填 URL（字符串）即可；name 从域名推导，hosts 缺省用 DEFAULT_MIRROR_HOSTS。
+    需要自定义 hosts 的场景直接改 config.json。
+    """
+    if isinstance(v, str):
+        p = v.strip()
+        if not p:
+            raise ValueError("不能为空")
+        explicit_hosts = None
+    elif isinstance(v, dict):
+        p = str(v.get("prefix") or "").strip()
+        if not p:
+            raise ValueError("缺少 prefix 字段")
+        explicit_hosts = [str(h).strip() for h in (v.get("hosts") or []) if str(h).strip()]
+    else:
+        raise ValueError("必须是 URL 字符串或对象")
+    if "://" not in p and not p.endswith("="):
+        # 只填了域名（如 gh1.lhl.one）时补全协议，否则拼出来的是无效相对路径
+        p = "https://" + p
+    if not p.endswith(("/", "=")):
+        p += "/"
+    name = str(v.get("name") or "") if isinstance(v, dict) else ""
+    if not name:
+        name = urlparse(p).netloc or p
+    hosts = DEFAULT_MIRROR_HOSTS if explicit_hosts is None else explicit_hosts
+    return {"name": name, "prefix": p, "hosts": list(hosts)}
+
 
 def _save_overrides(data: dict):
     """把变更**合并**进既有 override 文件。
@@ -198,17 +264,17 @@ app = FastAPI(title="LX Source Hub", lifespan=lifespan)
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return _html("index.html")
 
 
 @app.get("/admin")
 async def admin_page():
-    return FileResponse(STATIC_DIR / "admin.html")
+    return _html("admin.html")
 
 
 @app.get("/login")
 async def login_page():
-    return FileResponse(STATIC_DIR / "admin.html")
+    return _html("admin.html")
 
 
 @app.get("/healthz")
@@ -400,6 +466,11 @@ async def admin_set(req: Request):
                 applied[k] = cast(v)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, f"字段 {k} 无效: {e}")
+    if "mirror_prefixes" in applied:
+        try:
+            applied["mirror_prefixes"] = [_norm_mirror(x) for x in applied["mirror_prefixes"]]
+        except ValueError as e:
+            raise HTTPException(400, f"字段 mirror_prefixes 无效: {e}")
     for k, v in applied.items():
         setattr(cfg, k, v)
     _save_overrides(applied)

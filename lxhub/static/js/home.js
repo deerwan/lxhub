@@ -12,25 +12,7 @@ try {
 const fmtSize = n => !n ? "—" : n > 1048576 ? (n/1048576).toFixed(1)+" MB"
   : n > 1024 ? (n/1024).toFixed(0)+" KB" : n+" B";
 
-/** 相对时间：省一半列宽；完整时间放 title */
-const fmtRel = s => {
-  if(!s) return {t:"—", full:""};
-  const d = new Date(s);
-  if(isNaN(d)) return {t:String(s), full:""};
-  const full = d.toLocaleString("zh-CN", {hour12:false});
-  const sec = (Date.now() - d.getTime()) / 1000;
-  let t;
-  if(sec < 0) t = full;
-  else if(sec < 60) t = "刚刚";
-  else if(sec < 3600) t = Math.floor(sec/60) + " 分钟前";
-  else if(sec < 86400) t = Math.floor(sec/3600) + " 小时前";
-  else if(sec < 2592000) t = Math.floor(sec/86400) + " 天前";
-  else t = d.toLocaleDateString("zh-CN");
-  return {t, full};
-};
-
-const fmtTime = s => fmtRel(s).t;
-const fmtFull = s => fmtRel(s).full || String(s || "—");
+/* fmtRel / fmtTime / fmtFull 已提升到 common.js，首页与后台共用 */
 
 const baseName = u => {
   try { return decodeURIComponent(u.split("?")[0].split("/").pop()); }

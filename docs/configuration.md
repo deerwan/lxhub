@@ -40,8 +40,12 @@
 | `LXH_HOST` | `host` |
 | `LXH_PORT` | `port` |
 | `LXH_DB` | `db_path` |
+| `LXH_ADMIN_USER` | 网页后台账户名（默认 `admin`） |
+| `LXH_ADMIN_PASS` | 网页后台密码（**留空则不启用鉴权**） |
 
-`.env` 文件同样会被读取（不支持嵌套引用），详见 [配置 GitHub Token](github-token.md)。
+上表所有环境变量都可以直接写在项目根目录的 `.env` 里，适合本地开发与自部署
+（不支持嵌套引用）。`.env` 已被 `.gitignore` 忽略，不会进版本库。
+详见 [配置 GitHub Token](github-token.md) 与 [部署方式](deploy.md)。
 
 ## 想重新收录？
 

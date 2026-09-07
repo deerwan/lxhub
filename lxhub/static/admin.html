@@ -20,8 +20,8 @@
 .admin-err{color:var(--red);font-size:12.5px;min-height:18px;margin:10px 0 4px}
 .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:10px}
 .stat-box{background:var(--surface-2);border:1px solid var(--line-soft);
-  border-radius:var(--r-sm);padding:11px 13px}
-.stat-box b{display:block;font-size:18px}
+  border-radius:var(--r-sm);padding:11px 13px;min-width:0;overflow:hidden}
+.stat-box b{display:block;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat-box span{font-size:12px;color:var(--mute)}
 .admin-actions{display:flex;gap:8px;flex-wrap:wrap}
 a{color:var(--accent)}
@@ -86,14 +86,12 @@ a{color:var(--accent)}
       <div class="stat-box"><b x-text="stats.total">—</b><span>收录链接</span></div>
       <div class="stat-box"><b x-text="stats.alive">—</b><span>当前可访问</span></div>
       <div class="stat-box"><b x-text="stats.valid">—</b><span>疑似音源脚本</span></div>
-      <div class="stat-box"><b x-text="stats.lastCrawl">—</b><span>最近爬取</span></div>
+      <div class="stat-box"><b x-text="stats.lastCrawl" :title="stats.lastCrawlFull">—</b><span>最近爬取</span></div>
     </div>
   </div>
 
   <div class="admin-card">
-    <h3>配置</h3>
     <div class="admin-form" id="adminForm"></div>
-    <p class="admin-tip">配置保存在数据卷（data/config.override.json），修改即时生效、重启不丢。</p>
   </div>
 
   <div class="admin-card">

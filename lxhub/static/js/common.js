@@ -25,6 +25,26 @@ async function trigger(path){
   }catch(e){ toast("触发失败（服务未运行?）"); }
 }
 
+/** 相对时间：省一半列宽；完整时间放 title（首页与后台共用） */
+const fmtRel = s => {
+  if(!s) return {t:"—", full:""};
+  const d = new Date(s);
+  if(isNaN(d)) return {t:String(s), full:""};
+  const full = d.toLocaleString("zh-CN", {hour12:false});
+  const sec = (Date.now() - d.getTime()) / 1000;
+  let t;
+  if(sec < 0) t = full;
+  else if(sec < 60) t = "刚刚";
+  else if(sec < 3600) t = Math.floor(sec/60) + " 分钟前";
+  else if(sec < 86400) t = Math.floor(sec/3600) + " 小时前";
+  else if(sec < 2592000) t = Math.floor(sec/86400) + " 天前";
+  else t = d.toLocaleDateString("zh-CN");
+  return {t, full};
+};
+
+const fmtTime = s => fmtRel(s).t;
+const fmtFull = s => fmtRel(s).full || String(s || "—");
+
 /* ---------- 主题：跟随系统 / 暗色 / 亮色 ---------- */
 const THEME_KEY = "lxh.theme";
 
