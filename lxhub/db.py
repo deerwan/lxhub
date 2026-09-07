@@ -115,7 +115,48 @@ class DB:
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection):
-        """旧库补列（新库建表时已含这些列，ALTER 会因重复列失败，忽略即可）。"""
+        """确保所有表存在并补全新列（旧库迁移）。"""
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "sources" not in tables:
+            conn.execute("""
+                CREATE TABLE sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT UNIQUE NOT NULL,
+                    name TEXT DEFAULT '',
+                    version TEXT DEFAULT '',
+                    author TEXT DEFAULT '',
+                    description TEXT DEFAULT '',
+                    homepage TEXT DEFAULT '',
+                    platforms TEXT DEFAULT '[]',
+                    origin_repo TEXT DEFAULT '',
+                    origin_url TEXT DEFAULT '',
+                    origin_kind TEXT DEFAULT '',
+                    file_size INTEGER DEFAULT 0,
+                    sha256 TEXT DEFAULT '',
+                    http_status INTEGER DEFAULT 0,
+                    is_alive INTEGER DEFAULT 0,
+                    looks_valid INTEGER DEFAULT 0,
+                    script_type TEXT DEFAULT '',
+                    api_hosts TEXT DEFAULT '[]',
+                    api_alive TEXT DEFAULT '',
+                    api_checked TEXT DEFAULT '',
+                    content_text TEXT DEFAULT '',
+                    first_seen TEXT DEFAULT '',
+                    last_checked TEXT DEFAULT '',
+                    last_alive TEXT DEFAULT '',
+                    content_updated_at TEXT DEFAULT ''
+                )""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sources_alive ON sources(is_alive, looks_valid)")
+        if "runs" not in tables:
+            conn.execute("""
+                CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT DEFAULT '',
+                    detail TEXT DEFAULT ''
+                )""")
         cols = {r[1] for r in conn.execute("PRAGMA table_info(sources)")}
         for col, ddl in (
                 ("script_type", "TEXT DEFAULT ''"),
