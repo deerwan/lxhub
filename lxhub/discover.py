@@ -197,19 +197,22 @@ async def discover_repos(client, cfg, log) -> dict:
         return added
 
     # 前 2 个关键词多维度并行；其余串行
+    _limit = asyncio.Semaphore(3)  # 同时最多 3 个搜索任务，避免 Search API 限流
+
+    async def _limited(kw, sort):
+        async with _limit:
+            return await _kw_sort(kw, sort)
+
     tasks: list = []
     for sort in sort_orders:
-        tasks.append(asyncio.create_task(_kw_sort(top_kws[0], sort)))
-    # 第 2 个关键词的 sorted 任务与上面错开，避免同时触发太多
+        tasks.append(asyncio.create_task(_limited(top_kws[0], sort)))
     await asyncio.sleep(0.5)
     for sort in sort_orders:
-        tasks.append(asyncio.create_task(_kw_sort(top_kws[1], sort)))
-    # 剩余关键词用 updated 排序补充
+        tasks.append(asyncio.create_task(_limited(top_kws[1], sort)))
     for kw in top_kws[2:]:
-        tasks.append(asyncio.create_task(_kw_sort(kw, "updated")))
-    # 非 top 关键词只搜 updated 排序
+        tasks.append(asyncio.create_task(_limited(kw, "updated")))
     for kw in cfg.keywords[len(top_kws):]:
-        tasks.append(asyncio.create_task(_kw_sort(kw, "updated")))
+        tasks.append(asyncio.create_task(_limited(kw, "updated")))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     total_found = sum(r for r in results if isinstance(r, int))
