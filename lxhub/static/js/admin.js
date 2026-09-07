@@ -196,6 +196,11 @@ function adminApp(){
         this.renderProg(p, true);
         this.taskBusy = false;
         this.loadStats();
+        const s = p.stats || {};
+        toast(p.cancelled ? "任务已取消"
+          : p.kind === "crawl" ? `爬取完成：检测 ${s.checked ?? "—"} 条，疑似音源 ${s.valid ?? "—"} 条`
+          : `检测完成：存活 ${s.alive ?? "—"} / 失效 ${s.dead ?? "—"}`);
+        setTimeout(() => { this.prog.running = false; }, 6000);
         return;
       }
       this.renderProg(p, false);
@@ -203,7 +208,7 @@ function adminApp(){
 
     renderProg(p, done){
       const s = p.stats || {};
-      this.prog.running = true;
+      this.prog.running = !done;
       this.prog.title = done ? (p.cancelled ? "已取消" : "已完成")
                             : (p.kind === "crawl" ? "正在爬取" : "正在检测");
       this.prog.msg = p.message || "";
