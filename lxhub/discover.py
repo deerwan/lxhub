@@ -261,7 +261,8 @@ async def discover_repos(client, cfg, log) -> dict:
         if full and full not in repos and len(repos) < cfg.max_repos_total:
             repos[full] = {"kind": kind, "url": url or f"https://github.com/{full}",
                            "description": description or ""}
-        return full
+            return True  # 新增成功；调用方用 int() 累加计数，不能返回仓库名字符串
+        return False
 
     # ---------- 1) GitHub API 多维度并行搜索 ----------
     sort_orders = ["stars", "forks", "updated"]
