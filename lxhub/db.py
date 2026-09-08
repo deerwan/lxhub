@@ -1,6 +1,7 @@
 """SQLite 存储层：线程级持久连接 + 写锁，WAL 模式。"""
 import datetime as dt
 import json
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -15,6 +16,33 @@ class _Conn:
 
 
 _LOCK = threading.Lock()
+
+
+# ---------- 同名副本收敛 ----------
+# 音源仓库常按日期/版本把同一脚本复制多份（V260322/、V260907/…），
+# 这里从 URL 里取最像"快照版本号"的片段作为排序依据，越大越新。
+_DATE_TOKEN = re.compile(r"(?:^|/|[-_.])[Vv]?(\d{6})(?=$|/|[-_.])")
+_VER_TOKEN = re.compile(r"[Vv]?(\d+(?:\.\d+)+)")
+
+
+def _snapshot_key(url: str) -> str:
+    """提取日期/版本片段作为排序键；取不到返回空串。"""
+    m = _DATE_TOKEN.search(url or "")
+    if m:
+        return m.group(1)                    # V260907 / 202609 这类日期快照
+    m = _VER_TOKEN.search(url or "")
+    if m:
+        # 2.3.0 -> 000200030000，让字符串比较等价于逐段数值比较
+        return "".join(p.zfill(4) for p in m.group(1).split("."))
+    return ""
+
+
+def _copy_rank(row: dict) -> tuple:
+    """副本优劣：存活 > 最近存活时间 > 快照版本更新 > 路径更短。"""
+    return (1 if row.get("is_alive") else 0,
+            row.get("last_alive") or "",
+            _snapshot_key(row.get("url")),
+            -len(row.get("url") or ""))
 
 
 SCHEMA = """
@@ -35,10 +63,12 @@ CREATE TABLE IF NOT EXISTS sources (
     http_status INTEGER DEFAULT 0,
     is_alive INTEGER DEFAULT 0,
     looks_valid INTEGER DEFAULT 0,
+    valid_tier TEXT DEFAULT '',
     script_type TEXT DEFAULT '',
     api_hosts TEXT DEFAULT '[]',
     api_alive TEXT DEFAULT '',
     api_checked TEXT DEFAULT '',
+    api_down_streak INTEGER DEFAULT 0,
     content_text TEXT DEFAULT '',
     first_seen TEXT DEFAULT '',
     last_checked TEXT DEFAULT '',
@@ -58,8 +88,8 @@ CREATE TABLE IF NOT EXISTS runs (
 _INSERT_COLS = [
     "url", "name", "version", "author", "description", "homepage", "platforms",
     "origin_repo", "origin_url", "origin_kind", "file_size", "sha256",
-    "http_status", "is_alive", "looks_valid", "script_type",
-    "api_hosts", "api_alive", "api_checked", "content_text",
+    "http_status", "is_alive", "looks_valid", "valid_tier", "script_type",
+    "api_hosts", "api_alive", "api_checked", "api_down_streak", "content_text",
     "first_seen", "last_checked", "last_alive", "content_updated_at",
 ]
 
@@ -81,6 +111,7 @@ ON CONFLICT(url) DO UPDATE SET
     http_status=excluded.http_status,
     is_alive=excluded.is_alive,
     looks_valid=excluded.looks_valid,
+    valid_tier=excluded.valid_tier,
     script_type=excluded.script_type,
     api_hosts=CASE WHEN excluded.is_alive = 1 THEN excluded.api_hosts ELSE sources.api_hosts END,
     api_alive=excluded.api_alive,
@@ -99,9 +130,9 @@ _DEFAULTS = {
     "name": "", "version": "", "author": "", "description": "", "homepage": "",
     "platforms": "[]", "origin_repo": "", "origin_url": "", "origin_kind": "",
     "file_size": 0, "sha256": "", "http_status": 0, "is_alive": 0,
-    "looks_valid": 0, "script_type": "", "api_hosts": "[]", "api_alive": "",
-    "api_checked": "", "content_text": "", "first_seen": "",
-    "last_checked": "", "last_alive": "", "content_updated_at": "",
+    "looks_valid": 0, "valid_tier": "", "script_type": "", "api_hosts": "[]",
+    "api_alive": "", "api_checked": "", "api_down_streak": 0, "content_text": "",
+    "first_seen": "", "last_checked": "", "last_alive": "", "content_updated_at": "",
 }
 
 
@@ -163,6 +194,8 @@ class DB:
                 ("api_hosts", "TEXT DEFAULT '[]'"),
                 ("api_alive", "TEXT DEFAULT ''"),
                 ("api_checked", "TEXT DEFAULT ''"),
+                ("valid_tier", "TEXT DEFAULT ''"),
+                ("api_down_streak", "INTEGER DEFAULT 0"),
                 ("content_updated_at", "TEXT DEFAULT ''")):
             if col not in cols:
                 try:
@@ -171,6 +204,11 @@ class DB:
                         conn.execute(
                             "UPDATE sources SET content_updated_at = first_seen "
                             "WHERE content_updated_at = '' OR content_updated_at IS NULL")
+                    if col == "valid_tier":
+                        # 存量有效记录暂记中置信，待下轮爬取按新分级重新评估
+                        conn.execute(
+                            "UPDATE sources SET valid_tier = 'probable' "
+                            "WHERE looks_valid = 1 AND (valid_tier = '' OR valid_tier IS NULL)")
                 except sqlite3.OperationalError:
                     pass
 
@@ -214,7 +252,7 @@ class DB:
         sql = "SELECT * FROM sources"
         if valid_only:
             sql += " WHERE looks_valid = 1"
-        sql += " ORDER BY is_alive DESC, looks_valid DESC, last_alive DESC, first_seen DESC LIMIT ?"
+        sql += " ORDER BY is_alive DESC, looks_valid DESC, valid_tier DESC, last_alive DESC, first_seen DESC LIMIT ?"
         rows = [self._to_source_dict(r) for r in self._run(sql, (limit,))]
         # 同内容多仓库镜像合并：保留一条主记录，其余记入 mirrors
         merged: list = []
@@ -296,9 +334,50 @@ class DB:
             self._c.conn.commit()
             return cur.rowcount
 
+    def prune_same_name_copies(self) -> int:
+        """同一来源仓库 + 同一脚本名的多份副本，只保留最优的一份。
+
+        音源仓库常按日期/版本把同一脚本复制多份（V260322/、V260907/…），内容略有
+        差异却各占一条，是列表噪声的主要来源。这里只收敛**同一仓库内**的同名副本；
+        跨仓库的相同内容仍作为镜像保留，主链接失效时镜像仍可顶上。
+        """
+        rows = self._run("""SELECT id, url, name, origin_repo, is_alive, last_alive
+                            FROM sources WHERE looks_valid = 1 AND TRIM(name) != ''""")
+        groups: dict = {}
+        for r in rows:
+            key = ((r["origin_repo"] or "").lower(), (r["name"] or "").strip().lower())
+            groups.setdefault(key, []).append(dict(r))
+        drop = []
+        for g in groups.values():
+            if len(g) < 2:
+                continue
+            g.sort(key=_copy_rank, reverse=True)
+            drop += [x["url"] for x in g[1:]]
+        if drop:
+            self.delete_urls(drop)
+        return len(drop)
+
     def update_api_probe(self, sid: int, alive: str, checked_at: str):
-        self._run("UPDATE sources SET api_alive = ?, api_checked = ? WHERE id = ?",
-                  (alive, checked_at, sid))
+        """记录后端探测结果，并维护连续不可达计数（up 清零，down 累加）。"""
+        self._run(
+            "UPDATE sources SET api_alive = ?, api_checked = ?,"
+            "    api_down_streak = CASE WHEN ? = 'down' THEN api_down_streak + 1 ELSE 0 END"
+            " WHERE id = ?",
+            (alive, checked_at, alive, sid))
+
+    def prune_dead_backends(self, min_streak: int = 8) -> int:
+        """链接仍在、但后端连续 min_streak 轮全部不可达的音源，视为已废弃清出列表。
+
+        探测是根路径 ping：拿不到任何 HTTP 响应（DNS 失败/超时/拒连）才计「挂」。
+        默认 8 轮按 12h 复检间隔约 4 天，足以排除临时网络抖动；清掉的是
+        "链接活着但音源早已废弃"的僵尸记录。
+        """
+        with _LOCK:
+            cur = self._c.conn.execute(
+                "DELETE FROM sources WHERE looks_valid = 1 AND api_down_streak >= ?",
+                (min_streak,))
+            self._c.conn.commit()
+            return cur.rowcount
 
     def stats(self) -> dict:
         rows = self._run(

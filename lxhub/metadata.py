@@ -15,6 +15,7 @@ _KEY_MAP = {
     "description": "description", "describe": "description", "描述": "description",
     "说明": "description", "简介": "description",
     "homepage": "homepage", "home": "homepage", "网址": "homepage", "主页": "homepage",
+    "update_url": "update_url", "updateurl": "update_url", "更新地址": "update_url",
 }
 
 _CODE_MAP = {
@@ -45,35 +46,66 @@ def parse_annotations(text: str, limit: int = 8000) -> dict:
             continue
         if value and not meta.get(key):
             meta[key] = value
-        if all(meta.get(x) for x in ("name", "version", "author", "description")):
+        if all(meta.get(x) for x in ("name", "version", "author", "description",
+                                     "update_url")):
             break
     return meta
 
 
-def looks_valid(text: str) -> bool:
-    """静态特征评分判定“像不像一个可导入的 lx 自定义源脚本”。"""
+# ---------- 混淆脚本识别 ----------
+# javascript-obfuscator 产物特征：_0x 十六进制标识符、长 \x 转义串。
+# 混淆会把 musicUrl / EVENT_NAMES 等字面量藏进字符串表，词面匹配全部失效，
+# 只能改信脚本头部的明文 @ 注释（混淆源几乎都保留可读头，便于用户辨识）。
+_OBF_ID = re.compile(r"\b_0x[a-f0-9]{4,}\b")
+_HEX_ESC = re.compile(r"(?:\\x[0-9a-fA-F]{2}){6,}")
+
+
+def is_obfuscated(text: str, sample: int = 20_000) -> bool:
+    head = text[:sample]
+    return len(_OBF_ID.findall(head)) >= 10 or len(_HEX_ESC.findall(head)) >= 3
+
+
+# 事件注册骨架：lx 自定义源必须订阅 request 事件才能工作，写法有
+# on(EVENT_NAMES.request / on(globalThis.lx.EVENT_NAMES.request /
+# on(EVENT_NAMES['request'] / on('request' 等，点号/方括号访问、任意
+# 长度的对象链前缀都要兼容（混淆前的小型混淆器只藏部分字面量）。
+_EVT_REG = re.compile(
+    r"\bon\s*\(\s*(?:[A-Za-z_$][\w$]*\s*\.\s*)*EVENT_NAMES"
+    r"\s*(?:\.\s*request|\[\s*['\"]request['\"]\s*\])"
+    r"|\bon\s*\(\s*['\"]request['\"]\s*,")
+
+# musicUrl 的两种形态：actions 里定义 getMusicUrl 方法，或在 request
+# 分发处匹配 'musicUrl' action 字符串（switch case / === 比较都算）。
+_MUSIC_URL_ACT = re.compile(r"['\"]musicUrl['\"]")
+
+
+def valid_tier(text: str) -> str:
+    """结构化置信分级：confirmed / probable / ''（不收录）。
+
+    只靠 "globalThis.lx + musicUrl" 词面共现凑分会误收仓库里的模板/脚手架文件，
+    改为要求真实音源的注册结构：
+      - confirmed：订阅 request 事件 + 应答 musicUrl（方法名或 action 字符串）
+      - probable ：仅订阅 request 事件，或混淆脚本（字面量不可信，改凭明文
+                   头注释 @name + @version/@update_url 识别）
+      - ''       ：无任何结构特征，不再收录（前端也不必展示）
+    """
     if not text:
-        return False
+        return ""
     head = text[:600].lower()
     if "<!doctype" in head or "<html" in head:
-        return False
+        return ""
     # lx 自定义源跑在无 require 的沙箱里；Node 代码（运行时框架/桥接服务）不是音源
     if "module.exports" in text or len(re.findall(r"\brequire\s*\(", text)) >= 3:
-        return False
-    score = 0
-    if "globalthis.lx" in text.lower():
-        score += 2
-    if "EVENT_NAMES" in text:
-        score += 1
-    if re.search(r"EVENT_NAMES\s*\.\s*request|\blx\s*\.\s*on\s*\(", text):
-        score += 1
-    if "musicUrl" in text:
-        score += 2
-    if "sources" in text and ("inited" in text or "qualitys" in text):
-        score += 1
-    if "__lx_native_call__" in text or "lx_setup" in text:
-        score -= 3
-    return score >= 4
+        return ""
+    if _EVT_REG.search(text):
+        if "getMusicUrl" in text or _MUSIC_URL_ACT.search(text):
+            return "confirmed"
+        return "probable"
+    if is_obfuscated(text):
+        meta = parse_annotations(text)
+        if meta.get("name") and (meta.get("version") or meta.get("update_url")):
+            return "probable"
+    return ""
 
 
 def classify_script(text: str) -> str:
@@ -89,11 +121,15 @@ def classify_script(text: str) -> str:
         return "companion"
     if "module.exports" in text or len(re.findall(r"\brequire\s*\(", text)) >= 3:
         return "companion"
-    if (re.search(r"EVENT_NAMES\s*\.\s*request|EVENT_NAMES\[.request.]", text)
-            and "musicUrl" in text):
+    if _EVT_REG.search(text) and "musicUrl" in text:
         return "source"
     if "globalthis.lx" in tl and "musicUrl" in text:
         return "source"
+    # 混淆脚本：musicUrl 等字面量被藏进字符串表，改信明文头注释
+    if is_obfuscated(text):
+        meta = parse_annotations(text)
+        if meta.get("name") and (meta.get("version") or meta.get("update_url")):
+            return "source"
     return "unknown"
 
 

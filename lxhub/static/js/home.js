@@ -151,11 +151,12 @@ const SORT_VAL = {
 
 function sortList(list){
   const k = SORT.key;
-  if(!k){ // 默认：可用优先 + 最近更新优先（后端挂沉底）
+  if(!k){ // 默认：可用优先 + 高置信优先 + 最近更新优先（后端挂沉底）
     const t = s => s.content_updated_at || s.first_seen || "";
     return [...list].sort((a, b) =>
       (a.api_alive === "down") - (b.api_alive === "down") ||
       (Number(b.is_alive) - Number(a.is_alive)) ||
+      ((b.valid_tier === "confirmed") - (a.valid_tier === "confirmed")) ||
       (t(b) < t(a) ? -1 : t(b) > t(a) ? 1 : 0));
   }
   const get = SORT_VAL[k] || (() => "");
@@ -206,6 +207,8 @@ function render(){
           `<span class="plat">${PLAT[p] || esc(p)}</span>`).join("")}</div>`
       : '<span class="muted">—</span>';
     const inline = (!s.looks_valid ? '<span class="tag warn">非音源?</span>' : "")
+      + (s.looks_valid && s.valid_tier !== "confirmed"
+          ? '<span class="tag warn" title="结构不全或混淆判定，置信度较低">待验证</span>' : "")
       + ((s.mirrors||[]).length
           ? `<span class="tag mirror" title="${esc((s.mirrors||[]).join("\n"))}">+${s.mirrors.length} 镜像</span>`
           : "");
@@ -432,7 +435,9 @@ async function openDetail(id){
   $("#dApi").textContent = s.api_alive === "up" ? `活 · ${hosts.length} 个域名可访问`
     : s.api_alive === "down" ? "挂 · 声明的后端域名均不可达"
     : hosts.length ? "未探测" : "脚本未声明后端域名";
-  $("#dType").textContent = TYPE_TXT[s.script_type] || "存疑";
+  $("#dType").textContent = (TYPE_TXT[s.script_type] || "存疑")
+    + (s.valid_tier === "confirmed" ? " · 高置信"
+       : s.valid_tier === "probable" ? " · 待验证" : "");
 
   $("#dMirrors").innerHTML = (s.mirrors || []).length
     ? s.mirrors.map(u => `<div class="muted" style="word-break:break-all">${esc(u)}</div>`).join("")

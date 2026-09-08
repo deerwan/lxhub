@@ -48,8 +48,9 @@ async def run_check(cfg, db, log=print, progress=None):
                 counters["dead"] += 1
             p.update(urls_done=counters["done"], alive=counters["alive"],
                      dead=counters["dead"])
-            # 音源条目顺带探测后端域名：结果按内容哈希缓存，再写到组内每一行
-            if row.get("script_type") == "source":
+            # 有效音源顺带探测后端域名：结果按内容哈希缓存，再写到组内每一行。
+            # 不限定 script_type==source：结构不全/混淆判定的源同样需要后端信号
+            if row.get("looks_valid"):
                 sha_key = row.get("sha256") or f"id:{row['id']}"
                 if sha_key not in probe_cache:
                     try:
@@ -65,6 +66,10 @@ async def run_check(cfg, db, log=print, progress=None):
 
     try:
         await asyncio.gather(*(one(r) for r in rows))
+        # 后端连续多轮全挂的音源视同废弃，直接清出列表
+        removed = db.prune_dead_backends()
+        if removed:
+            log(f"[检测] 清理后端长期不可达记录 {removed} 条")
         counters["cancelled"] = p.cancelled
         db.finish_run(run_id, now(), json.dumps(
             {"checked": counters["done"], "alive": counters["alive"],

@@ -24,7 +24,7 @@ from urllib.parse import quote, unquote, urlparse, parse_qs
 
 from .fetcher import decode_bytes, fetch_limited, new_client, probe_hosts
 from .metadata import (classify_script, detect_platforms, extract_api_hosts,
-                       looks_valid, parse_annotations)
+                       parse_annotations, valid_tier)
 
 RAW = "https://raw.githubusercontent.com"
 JSD_DATA = "https://data.jsdelivr.com/v1/packages/gh"
@@ -54,6 +54,76 @@ def _is_app_internal(path: str) -> bool:
     return bool(_APP_PATH.search(path))
 
 
+# ---------- 候选文件打分 ----------
+# 权重越大越优先抓取。注意这与"文件越大越重要"相反：聚合脚本、打包产物往往体积
+# 巨大，而可直接导入的音源脚本通常名字直白、位于浅层目录。改权重即可调整收录取向。
+_CAND_WEIGHTS = {
+    "name_hit": 6,     # 文件名直接带音源特征
+    "path_hit": 3,     # 仅路径带特征
+    "user_js": 4,      # .user.js 是常见分发形式
+    "depth": -1,       # 每多一层目录
+    "size_ok": 2,      # 2KB ~ 800KB：音源脚本常见区间
+    "size_tiny": -4,   # < 2KB：多为占位/空壳
+    "size_huge": -2,   # > 800KB：多为打包产物
+    "bundle": -6,      # dist/build/vendor/webpack 等构建产物
+    "sample": -6,      # 示例 / 测试 / 备份
+}
+
+_SOURCE_HINT = re.compile(r"音源|音乐源|music|source|lx|洛雪|聚合|自定义源", re.I)
+_BUNDLE_HINT = re.compile(
+    r"(^|/)(dist|build|out|vendor|assets?|static|chunk|node_modules)(/|$)"
+    r"|webpack|\.bundle\.|[-.]min\.", re.I)
+_SAMPLE_HINT = re.compile(
+    r"(^|/)(tests?|demos?|examples?|samples?|docs?)(/|$)"
+    r"|[-_](test|demo|example|sample|bak|old|backup)\b|备份|测试|示例", re.I)
+
+# 解析出的脚本名（@name）含这些特征时视为测试/示例源，整体降权不收录为有效音源
+_NAME_SAMPLE_HINT = re.compile(
+    r"测试|示例|样例|试用|演示|废弃|弃用|过期|失效|演示版|测试版|"
+    r"demo|test|sample|example|beta|mock|fake|dummy|练手", re.I)
+
+# 生态经验规则：真实分发的音源几乎全部中文命名（lx 音乐是面向国内平台的应用，
+# 作者发布时 @name 都写中文，如"墨澜聚合音源"）；无中文字符的名字基本是把文件名
+# 当名字的模板/脚手架/客户端脚本（lx-source、runtime、Lx-Custom-Source 等），
+# 它们结构上像音源但并非给人导入使用，一律不收录。
+_CJK = re.compile(r"[\u4e00-\u9fff]")
+
+# 仓库名/描述命中这些"明显是代码/示例/脚手架"的特征时，直接跳过（拦截无关仓库）。
+# 注意：不要加 keep-alive / health-check 这类"看着像无关、实际可能托管真音源"的词，
+# Huibq/keep-alive 就托管了有效音源 Huibq_lxmusic源，整仓库屏蔽会误杀。
+_REPO_NOISE_HINT = re.compile(
+    r"(hello[-_]?world|dotfiles|boilerplate|tutorial|playground|sandbox|"
+    r"scratch|benchmark|crawler|spider|"
+    r"test[-_]?repo|demo[-_]?repo|example[-_]?repo|"
+    r"my[-_]?(test|demo|example)|sample[-_]?project)", re.I)
+
+
+def score_candidate(path: str, size: int) -> int:
+    """给候选 .js 路径打分：越像可导入的音源脚本分越高。"""
+    w = _CAND_WEIGHTS
+    low = path.lower()
+    name = low.rsplit("/", 1)[-1]
+    score = 0
+    if _SOURCE_HINT.search(name):
+        score += w["name_hit"]
+    elif _SOURCE_HINT.search(low):
+        score += w["path_hit"]
+    if name.endswith(".user.js"):
+        score += w["user_js"]
+    score += w["depth"] * low.count("/")
+    if size < 2048:
+        score += w["size_tiny"]
+    elif size <= 800_000:
+        score += w["size_ok"]
+    else:
+        score += w["size_huge"]
+    if _BUNDLE_HINT.search(low):
+        score += w["bundle"]
+    if _SAMPLE_HINT.search(low):
+        score += w["sample"]
+    return score
+
+
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
@@ -65,6 +135,15 @@ def _valid_repo(full: str) -> str | None:
     if parts[0].lower() in _BLOCK or parts[1].lower() in _BLOCK:
         return None
     return f"{parts[0]}/{parts[1]}"
+
+
+def _repo_is_noise(full: str, description: str = "") -> bool:
+    """挡掉明显与音源无关的仓库（keep-alive / 测试 / 示例 等）。
+
+    仅做保守的“否证”拦截：仓库名或描述命中非音源特征词才跳过，避免误伤描述
+    较少的合法仓库（搜索召回的仓库大多已在名称/描述里带音源关键词）。
+    """
+    return bool(_REPO_NOISE_HINT.search(f"{full} {description}"))
 
 
 async def _fetch_readme(client, full: str) -> str:
@@ -168,7 +247,7 @@ async def _search_all_pages(client, cfg, kw: str, sort: str, log, max_pages: int
 
 
 async def discover_repos(client, cfg, log) -> dict:
-    """返回 {full_name: {"kind":..., "url":...}}
+    """返回 {full_name: {"kind":..., "url":..., "description":...}}
 
     多维度搜索策略：
       1. 热门关键词 × (stars / forks / updated) 并行，各最多 3 页
@@ -177,10 +256,11 @@ async def discover_repos(client, cfg, log) -> dict:
     """
     repos: dict = {}
 
-    def add(full, kind, url=""):
+    def add(full, kind, url="", description=""):
         full = _valid_repo(full)
         if full and full not in repos and len(repos) < cfg.max_repos_total:
-            repos[full] = {"kind": kind, "url": url or f"https://github.com/{full}"}
+            repos[full] = {"kind": kind, "url": url or f"https://github.com/{full}",
+                           "description": description or ""}
         return full
 
     # ---------- 1) GitHub API 多维度并行搜索 ----------
@@ -193,7 +273,11 @@ async def discover_repos(client, cfg, log) -> dict:
         items = await _search_all_pages(client, cfg, kw, sort, log, max_pages=3)
         added = 0
         for item in items:
-            added += int(add(item["full_name"], f"search_{sort}"))
+            full = item["full_name"]
+            desc = item.get("description") or ""
+            if _repo_is_noise(full, desc):
+                continue
+            added += int(add(full, f"search_{sort}", description=desc))
         return added
 
     # 前 2 个关键词多维度并行；其余串行
@@ -252,7 +336,11 @@ async def discover_repos(client, cfg, log) -> dict:
             client, cfg, f"author:{author} (lx OR 洛雪 OR music-source OR lx-music)",
             "updated", log, max_pages=2)
         for item in items:
-            add(item["full_name"], f"author_{kind_hint}")
+            full = item["full_name"]
+            desc = item.get("description") or ""
+            if _repo_is_noise(full, desc):
+                continue
+            add(full, f"author_{kind_hint}", description=desc)
 
     while queue and len(repos) < cfg.max_repos_total:
         full, kind = queue.pop(0)
@@ -379,7 +467,9 @@ async def collect_repo_urls(client, cfg, full: str) -> list:
           and ".min." not in f["path"]
           and not _is_app_internal(f["path"])
           and 0 < f["size"] <= cfg.max_file_bytes]
-    for f in sorted(js, key=lambda x: -x["size"])[:cfg.max_files_per_repo]:
+    # 按"像不像音源脚本"排序，而不是按体积：体积倒序会优先抓到打包产物
+    js.sort(key=lambda f: (-score_candidate(f["path"], f["size"]), -f["size"]))
+    for f in js[:cfg.max_files_per_repo]:
         urls.append(f"{RAW}/{full}/HEAD/{f['path']}")
 
     # release assets 里的 .js 附件（覆盖"只发 Release 不发主分支"的情况）
@@ -414,6 +504,7 @@ async def inspect_url(client, cfg, url: str, origin: dict) -> dict:
         "sha256": hashlib.sha256(r["content"]).hexdigest() if r["content"] else "",
         "content_text": "",
         "looks_valid": 0,
+        "valid_tier": "",
         "platforms": "[]",
         "first_seen": now(),
         "last_checked": now(),
@@ -439,12 +530,25 @@ async def inspect_url(client, cfg, url: str, origin: dict) -> dict:
             d["author"] = meta.get("author") or d["author"]
             d["description"] = meta.get("description") or d["description"]
             d["homepage"] = meta.get("homepage") or d["homepage"]
-            d["looks_valid"] = 1 if looks_valid(text) else 0
+            tier = valid_tier(text)
+            d["looks_valid"] = 1 if tier else 0
+            d["valid_tier"] = tier
             # 无 @name 注释的通用文件名（index/main/app…）不当作音源
-            if d["looks_valid"] and not meta.get("name"):
+            if tier and not meta.get("name"):
                 stem = base.rsplit(".", 1)[0].lower()
                 if stem in ("index", "main", "app", "utils", "config", "setup"):
                     d["looks_valid"] = 0
+                    d["valid_tier"] = ""
+            # 解析出的名称带测试/示例/废弃特征：真实音源脚本但属测试样本，降权不收录
+            if d["looks_valid"] and _NAME_SAMPLE_HINT.search(d["name"]):
+                d["looks_valid"] = 0
+                d["valid_tier"] = ""
+                d["sample_name"] = True
+            # 名称无任何中文字符：模板/脚手架/客户端脚本，不是真实分发的音源
+            if d["looks_valid"] and not _CJK.search(d["name"]):
+                d["looks_valid"] = 0
+                d["valid_tier"] = ""
+                d["name_not_cjk"] = True
             d["script_type"] = classify_script(text)
             d["api_hosts"] = json.dumps(extract_api_hosts(text))
             d["platforms"] = json.dumps(detect_platforms(text))
@@ -485,8 +589,9 @@ async def run_crawl(cfg, db, log=print, progress=None):
                 d = await inspect_url(client, cfg, url, origin)
                 is_new = url not in known
                 known.add(url)
-                # 音源脚本顺带探测后端域名存活（仅探测服务器是否响应，不调用取歌接口）
-                if d["looks_valid"] and d["script_type"] == "source":
+                # 音源脚本顺带探测后端域名存活（仅探测服务器是否响应，不调用取歌接口）；
+                # 不再限定 script_type==source，避免结构不全/混淆判定的有效源漏探
+                if d["looks_valid"]:
                     try:
                         hosts = json.loads(d.get("api_hosts") or "[]")
                     except json.JSONDecodeError:
@@ -506,8 +611,16 @@ async def run_crawl(cfg, db, log=print, progress=None):
                     stats["dead"] += 1
                 p.update(urls_done=stats["checked"], new=stats["new"],
                          valid=stats["valid"], dead=stats["dead"])
-                tag = "疑似音源" if d["looks_valid"] else (
-                    "失效" if not d["is_alive"] else "普通js")
+                if d["looks_valid"]:
+                    tag = "疑似音源"
+                elif d.get("sample_name"):
+                    tag = "测试/示例"
+                elif d.get("name_not_cjk"):
+                    tag = "非中文名"
+                elif not d["is_alive"]:
+                    tag = "失效"
+                else:
+                    tag = "普通js"
                 log(f"  [{tag}] {url}")
 
         tasks = []
@@ -522,6 +635,9 @@ async def run_crawl(cfg, db, log=print, progress=None):
             if p.cancelled:
                 log("[爬取] 收到取消请求，停止扫描后续仓库")
                 break
+            if _repo_is_noise(full, meta.get("description", "")):
+                log(f"[爬取] 跳过疑似无关仓库 {full}")
+                continue
             cands = await collect_repo_urls(client, cfg, full)
             log(f"[爬取] {full}: 候选链接 {len(cands)} 个")
             repos_done += 1
@@ -549,6 +665,11 @@ async def run_crawl(cfg, db, log=print, progress=None):
         removed = db.prune_invalid(cutoff)
         if removed:
             log(f"[爬取] 清理非音源/长期失效记录 {removed} 条")
+
+        # 收敛同一仓库内的同名副本（按日期/版本复制的历史快照）
+        dups = db.prune_same_name_copies()
+        if dups:
+            log(f"[爬取] 收敛同名副本 {dups} 条")
 
         stats["cancelled"] = p.cancelled
         db.finish_run(run_id, now(), json.dumps(stats, ensure_ascii=False))
