@@ -211,6 +211,10 @@ function render(){
           ? '<span class="tag warn" title="结构不全或混淆判定，置信度较低">待验证</span>' : "")
       + ((s.mirrors||[]).length
           ? `<span class="tag mirror" title="${esc((s.mirrors||[]).join("\n"))}">+${s.mirrors.length} 镜像</span>`
+          : "")
+      + ((s.variants||[]).length
+          ? `<span class="tag mirror" title="${esc((s.variants||[]).map(v =>
+              `${v.origin_repo || v.url}${v.version ? " · v" + v.version : ""}${v.is_alive ? "" : " · 失效"}`).join("\n"))}">+${s.variants.length} 变体</span>`
           : "");
     const rel = fmtRel(s.last_alive || s.last_checked);
     return `<div class="grid-row row ${sk === "dead" ? "dead" : ""}" data-id="${s.id}">
@@ -441,6 +445,10 @@ async function openDetail(id){
 
   $("#dMirrors").innerHTML = (s.mirrors || []).length
     ? s.mirrors.map(u => `<div class="muted" style="word-break:break-all">${esc(u)}</div>`).join("")
+    : "—";
+  const vars = s.variants || [];
+  $("#dVars").innerHTML = vars.length
+    ? vars.map(v => `<div class="muted" style="word-break:break-all">${esc(v.origin_repo || v.url)}${v.version ? " · v" + esc(v.version) : ""}${v.is_alive ? "" : ' · <span style="color:var(--warn,#c0392b)">失效</span>'}</div>`).join("")
     : "—";
   $("#dOrigin").innerHTML = s.origin_url
     ? `<a href="${esc(s.origin_url)}" target="_blank" rel="noopener">${esc(s.origin_repo || "来源")}</a>`

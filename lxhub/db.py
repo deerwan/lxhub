@@ -22,7 +22,7 @@ _LOCK = threading.Lock()
 # 音源仓库常按日期/版本把同一脚本复制多份（V260322/、V260907/…），
 # 这里从 URL 里取最像"快照版本号"的片段作为排序依据，越大越新。
 _DATE_TOKEN = re.compile(r"(?:^|/|[-_.])[Vv]?(\d{6})(?=$|/|[-_.])")
-_VER_TOKEN = re.compile(r"[Vv]?(\d+(?:\.\d+)+)")
+_VER_TOKEN = re.compile(r"[Vv]?(\d+(?:\.\d+)*)")
 
 
 def _snapshot_key(url: str) -> str:
@@ -43,6 +43,35 @@ def _copy_rank(row: dict) -> tuple:
             row.get("last_alive") or "",
             _snapshot_key(row.get("url")),
             -len(row.get("url") or ""))
+
+
+def _norm_name(name: str) -> str:
+    """名称归一：去 emoji/空格/标点装饰，仅留中英文与数字，供跨仓库同名分组。
+
+    只剥装饰不剥语义后缀：「长青SVIP音源(二改修复版)」与「长青SVIP音源」
+    归一后仍不同组——二改版是不同的脚本，要保留各自可见性。
+    """
+    return re.sub(r"[\W_]+", "", (name or "").lower())
+
+
+def _ver_key(d: dict) -> str:
+    """组内排序键：优先取 @version 字段，拿不到再看 URL 里的版本片段。"""
+    m = _VER_TOKEN.search(d.get("version") or "")
+    if m:
+        return "".join(p.zfill(4) for p in m.group(1).split("."))
+    return _snapshot_key(d.get("url"))
+
+
+def _group_rank(d: dict) -> tuple:
+    """同名组内主记录优劣：高置信 > 存活 > 版本更新 > 最近存活 > 路径短。
+
+    版本优先于最近存活时间：复检时间只取决于检测顺序，不能反映脚本新旧。
+    """
+    return (d.get("valid_tier") == "confirmed",
+            1 if d.get("is_alive") else 0,
+            _ver_key(d),
+            d.get("last_alive") or "",
+            -len(d.get("url") or ""))
 
 
 SCHEMA = """
@@ -265,7 +294,27 @@ class DB:
                 d["mirrors"] = []
                 by_hash[key] = d
                 merged.append(d)
-        return merged
+        # 跨仓库同名分组：不同仓库搬运/改版产生的同名脚本只展示一条主记录，
+        # 其余记入 variants（内容有差异，不能当镜像删掉——"二改修复版"这类
+        # 变体可能比原版更好用）。非破坏性：主记录失效时下次读取自动改选最优。
+        groups: dict = {}
+        for i, d in enumerate(merged):
+            d["variants"] = []
+            key = _norm_name(d["name"])
+            if key:
+                groups.setdefault(key, []).append((i, d))
+        skip: set = set()
+        for g in groups.values():
+            if len(g) < 2:
+                continue
+            g.sort(key=lambda x: _group_rank(x[1]), reverse=True)
+            head = g[0][1]
+            head["variants"] = [
+                {k: v.get(k) for k in ("url", "origin_repo", "origin_url", "version",
+                                       "valid_tier", "is_alive", "last_alive", "mirrors")}
+                for _, v in g[1:]]
+            skip.update(i for i, _ in g[1:])
+        return [d for i, d in enumerate(merged) if i not in skip]
 
     def all_sources_rows(self, limit: int = 100_000, with_content: bool = False) -> list:
         """全部原始行（不合并镜像），供复检使用。
