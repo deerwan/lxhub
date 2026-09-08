@@ -118,7 +118,8 @@ _INSERT_COLS = [
     "url", "name", "version", "author", "description", "homepage", "platforms",
     "origin_repo", "origin_url", "origin_kind", "file_size", "sha256",
     "http_status", "is_alive", "looks_valid", "valid_tier", "script_type",
-    "api_hosts", "api_alive", "api_checked", "api_down_streak", "content_text",
+    "api_hosts", "api_alive", "api_checked", "api_down_streak",
+    "repo_pushed_at", "content_text",
     "first_seen", "last_checked", "last_alive", "content_updated_at",
 ]
 
@@ -145,6 +146,7 @@ ON CONFLICT(url) DO UPDATE SET
     api_hosts=CASE WHEN excluded.is_alive = 1 THEN excluded.api_hosts ELSE sources.api_hosts END,
     api_alive=excluded.api_alive,
     api_checked=excluded.api_checked,
+    repo_pushed_at=CASE WHEN excluded.repo_pushed_at != '' THEN excluded.repo_pushed_at ELSE sources.repo_pushed_at END,
     content_text=CASE WHEN excluded.content_text != '' THEN excluded.content_text ELSE sources.content_text END,
     content_updated_at=CASE
         WHEN excluded.sha256 != '' AND sources.sha256 != '' AND excluded.sha256 != sources.sha256
@@ -160,7 +162,8 @@ _DEFAULTS = {
     "platforms": "[]", "origin_repo": "", "origin_url": "", "origin_kind": "",
     "file_size": 0, "sha256": "", "http_status": 0, "is_alive": 0,
     "looks_valid": 0, "valid_tier": "", "script_type": "", "api_hosts": "[]",
-    "api_alive": "", "api_checked": "", "api_down_streak": 0, "content_text": "",
+    "api_alive": "", "api_checked": "", "api_down_streak": 0,
+    "repo_pushed_at": "", "content_text": "",
     "first_seen": "", "last_checked": "", "last_alive": "", "content_updated_at": "",
 }
 
@@ -225,6 +228,7 @@ class DB:
                 ("api_checked", "TEXT DEFAULT ''"),
                 ("valid_tier", "TEXT DEFAULT ''"),
                 ("api_down_streak", "INTEGER DEFAULT 0"),
+                ("repo_pushed_at", "TEXT DEFAULT ''"),
                 ("content_updated_at", "TEXT DEFAULT ''")):
             if col not in cols:
                 try:
@@ -413,6 +417,11 @@ class DB:
             "    api_down_streak = CASE WHEN ? = 'down' THEN api_down_streak + 1 ELSE 0 END"
             " WHERE id = ?",
             (alive, checked_at, alive, sid))
+
+    def set_repo_pushed_at(self, repo: str, pushed_at: str):
+        """把 GitHub 仓库最后更新时间写到该仓库收录的全部行（排序可用性先验）。"""
+        self._run("UPDATE sources SET repo_pushed_at = ? WHERE origin_repo = ?",
+                  (pushed_at, repo))
 
     def prune_dead_backends(self, min_streak: int = 8) -> int:
         """链接仍在、但后端连续 min_streak 轮全部不可达的音源，视为已废弃清出列表。

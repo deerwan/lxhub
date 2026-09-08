@@ -256,11 +256,12 @@ async def discover_repos(client, cfg, log) -> dict:
     """
     repos: dict = {}
 
-    def add(full, kind, url="", description=""):
+    def add(full, kind, url="", description="", pushed_at="", stars=0):
         full = _valid_repo(full)
         if full and full not in repos and len(repos) < cfg.max_repos_total:
             repos[full] = {"kind": kind, "url": url or f"https://github.com/{full}",
-                           "description": description or ""}
+                           "description": description or "",
+                           "pushed_at": pushed_at or "", "stars": stars or 0}
             return True  # 新增成功；调用方用 int() 累加计数，不能返回仓库名字符串
         return False
 
@@ -278,7 +279,9 @@ async def discover_repos(client, cfg, log) -> dict:
             desc = item.get("description") or ""
             if _repo_is_noise(full, desc):
                 continue
-            added += int(add(full, f"search_{sort}", description=desc))
+            added += int(add(full, f"search_{sort}", description=desc,
+                             pushed_at=item.get("pushed_at") or "",
+                             stars=item.get("stargazers_count") or 0))
         return added
 
     # 前 2 个关键词多维度并行；其余串行
@@ -341,7 +344,9 @@ async def discover_repos(client, cfg, log) -> dict:
             desc = item.get("description") or ""
             if _repo_is_noise(full, desc):
                 continue
-            add(full, f"author_{kind_hint}", description=desc)
+            add(full, f"author_{kind_hint}", description=desc,
+                pushed_at=item.get("pushed_at") or "",
+                stars=item.get("stargazers_count") or 0)
 
     while queue and len(repos) < cfg.max_repos_total:
         full, kind = queue.pop(0)
@@ -513,6 +518,7 @@ async def inspect_url(client, cfg, url: str, origin: dict) -> dict:
         "origin_repo": origin.get("repo", ""),
         "origin_url": origin.get("url", ""),
         "origin_kind": origin.get("kind", ""),
+        "repo_pushed_at": origin.get("pushed_at", ""),
     }
     if r["content"]:
         head = r["content"][:600]
@@ -556,6 +562,34 @@ async def inspect_url(client, cfg, url: str, origin: dict) -> dict:
     return d
 
 
+async def backfill_repo_dates(client, cfg, db, repos: dict, log=print) -> int:
+    """为收录行补 GitHub 仓库最后更新时间（pushed_at），作为可用性排序先验。
+
+    搜索命中的仓库自带 pushed_at，直接采用；其余缺日期的来源仓库逐个查一次
+    repo API（每仓库仅 1 次请求）。结果按 origin_repo 写到该仓库全部行。
+    """
+    dates: dict = {full: (m.get("pushed_at") or "") for full, m in repos.items()}
+    todo = {r["origin_repo"] for r in db.all_sources_rows()
+            if r.get("origin_repo") and not r.get("repo_pushed_at")}
+    todo -= {f for f, d in dates.items() if d}
+    for full in sorted(todo):
+        try:
+            r = await client.get(f"https://api.github.com/repos/{full}",
+                                 headers=_gh_headers(cfg))
+            if r.status_code == 200:
+                dates[full] = r.json().get("pushed_at") or ""
+        except Exception:
+            continue
+    written = 0
+    for full, d in dates.items():
+        if d:
+            db.set_repo_pushed_at(full, d)
+            written += 1
+    if written:
+        log(f"[爬取] 仓库更新时间覆盖 {written} 个仓库")
+    return written
+
+
 async def run_crawl(cfg, db, log=print, progress=None):
     from .progress import NoOpProgress
     p = progress or NoOpProgress()
@@ -569,6 +603,8 @@ async def run_crawl(cfg, db, log=print, progress=None):
         repos = await discover_repos(client, cfg, log)
         stats["repos"] = len(repos)
         log(f"[爬取] 待扫描仓库 {len(repos)} 个")
+        # 仓库更新时间先行回填：即使本轮 URL 未重扫，排序信号也已就位
+        await backfill_repo_dates(client, cfg, db, repos, log)
         p.update(repos_total=len(repos), repos_done=0,
                  urls_total=len(cfg.seed_urls), urls_done=0)
         p.set_phase("collect", f"扫描 {len(repos)} 个仓库")

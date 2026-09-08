@@ -146,13 +146,13 @@ const SORT_VAL = {
   plat:  s => (s.platforms || []).join(","),
   ver:   s => s.version || "",
   auth:  s => (s.author || "").toLowerCase(),
-  upd:   s => s.content_updated_at || s.first_seen || "",
+  upd:   s => s.repo_pushed_at || s.content_updated_at || s.first_seen || "",
 };
 
 function sortList(list){
   const k = SORT.key;
-  if(!k){ // 默认：可用优先 + 高置信优先 + 最近更新优先（后端挂沉底）
-    const t = s => s.content_updated_at || s.first_seen || "";
+  if(!k){ // 默认：可用优先 + 高置信优先 + 仓库更新新优先（后端挂沉底）
+    const t = s => s.repo_pushed_at || s.content_updated_at || s.first_seen || "";
     return [...list].sort((a, b) =>
       (a.api_alive === "down") - (b.api_alive === "down") ||
       (Number(b.is_alive) - Number(a.is_alive)) ||
@@ -216,7 +216,11 @@ function render(){
           ? `<span class="tag mirror" title="${esc((s.variants||[]).map(v =>
               `${v.origin_repo || v.url}${v.version ? " · v" + v.version : ""}${v.is_alive ? "" : " · 失效"}`).join("\n"))}">+${s.variants.length} 变体</span>`
           : "");
-    const rel = fmtRel(s.last_alive || s.last_checked);
+    const rel = fmtRel(s.repo_pushed_at || s.content_updated_at || s.last_alive || s.last_checked);
+    const tipBits = [];
+    if(s.repo_pushed_at) tipBits.push(`GitHub 仓库更新 ${fmtFull(s.repo_pushed_at)}`);
+    if(s.content_updated_at) tipBits.push(`脚本内容更新 ${fmtFull(s.content_updated_at)}`);
+    if(s.last_checked) tipBits.push(`最近检测 ${fmtFull(s.last_checked)}`);
     return `<div class="grid-row row ${sk === "dead" ? "dead" : ""}" data-id="${s.id}">
       <div class="c-no muted">${s._no ?? s.id}</div>
       <div class="c-st"><span class="pill ${sk}"><i class="dot"></i>${STATUS_TXT[sk]}</span></div>
@@ -224,7 +228,7 @@ function render(){
       <div class="c-plat">${plats}</div>
       <div class="c-ver muted cell-min" title="${esc(s.version||"")}">${esc(s.version || "—")}</div>
       <div class="c-auth muted cell-min" title="${esc(s.author||"")}">${esc(s.author || "—")}</div>
-      <div class="c-upd muted" title="${esc(rel.full)}">${esc(rel.t)}</div>
+      <div class="c-upd muted" title="${esc(tipBits.join("\n"))}">${esc(rel.t)}</div>
       <div class="c-act"><button class="copy" data-copy="${esc(withPrefix(s.url))}">复制</button><button class="dl" data-dl="${s.id}">下载</button></div>
     </div>`;
   }).join("");
