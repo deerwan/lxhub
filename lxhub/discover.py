@@ -228,11 +228,18 @@ async def _search_page(client, cfg, kw: str, sort: str, page: int, log) -> dict 
     return {"items": data.get("items", []), "total": data.get("total_count", 0)}
 
 
-async def _search_all_pages(client, cfg, kw: str, sort: str, log, max_pages: int = 3) -> list:
-    """逐页抓取，直到末页或达到 max_pages 限制。"""
+async def _search_all_pages(client, cfg, kw: str, sort: str, log, max_pages: int = 3,
+                            cancelled=None) -> list:
+    """逐页抓取，直到末页或达到 max_pages 限制。
+
+    `cancelled` 是可选的取消判断回调（如 `progress.cancelled` 的 getter）；
+    每翻一页前检查一次，避免取消后还在继续翻页等 HTTP。
+    """
     all_items = []
     page = 1
     while page <= max_pages:
+        if cancelled and cancelled():
+            break
         res = await _search_page(client, cfg, kw, sort, page, log)
         if res is None:
             break
@@ -246,15 +253,18 @@ async def _search_all_pages(client, cfg, kw: str, sort: str, log, max_pages: int
     return all_items
 
 
-async def discover_repos(client, cfg, log) -> dict:
+async def discover_repos(client, cfg, log, progress=None) -> dict:
     """返回 {full_name: {"kind":..., "url":..., "description":...}}
 
     多维度搜索策略：
-      1. 热门关键词 × (stars / forks / updated) 并行，各最多 3 页
-      2. 从已知种子仓库 README 提取作者名 → 顺藤搜该作者其他仓库
-      3. 种子仓库 + README 一跳引用扩展 + release assets
+     1. 热门关键词 × (stars / forks / updated) 并行，各最多 3 页
+     2. 从已知种子仓库 README 提取作者名 → 顺藤搜该作者其他仓库
+     3. 种子仓库 + README 一跳引用扩展 + release assets
     """
     repos: dict = {}
+
+    def _cancelled() -> bool:
+        return bool(getattr(progress, "cancelled", False))
 
     def add(full, kind, url="", description="", pushed_at="", stars=0):
         full = _valid_repo(full)
@@ -272,7 +282,10 @@ async def discover_repos(client, cfg, log) -> dict:
 
     async def _kw_sort(kw, sort):
         """搜索单关键词 + 单排序的多页结果。"""
-        items = await _search_all_pages(client, cfg, kw, sort, log, max_pages=3)
+        if _cancelled():
+            return 0
+        items = await _search_all_pages(client, cfg, kw, sort, log, max_pages=3,
+                                        cancelled=_cancelled)
         added = 0
         for item in items:
             full = item["full_name"]
@@ -303,6 +316,9 @@ async def discover_repos(client, cfg, log) -> dict:
         tasks.append(asyncio.create_task(_limited(kw, "updated")))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    if _cancelled():
+        log("[搜索] 收到取消请求，停止后续仓库发现")
+        return repos
     total_found = sum(r for r in results if isinstance(r, int))
     errs = [r for r in results if isinstance(r, Exception)]
     if errs:
@@ -311,8 +327,10 @@ async def discover_repos(client, cfg, log) -> dict:
         log(f"[搜索] API 命中 {len(repos)} 个仓库（去重前 {total_found} 条）")
 
     # 若 API 无结果，HTML 兜底
-    if not repos:
+    if not repos and not _cancelled():
         for kw in cfg.keywords:
+            if _cancelled():
+                break
             try:
                 r = await client.get(
                     f"https://github.com/search?q={quote(kw)}&type=repositories")
@@ -338,7 +356,7 @@ async def discover_repos(client, cfg, log) -> dict:
         seen_authors.add(author)
         items = await _search_all_pages(
             client, cfg, f"author:{author} (lx OR 洛雪 OR music-source OR lx-music)",
-            "updated", log, max_pages=2)
+            "updated", log, max_pages=2, cancelled=_cancelled)
         for item in items:
             full = item["full_name"]
             desc = item.get("description") or ""
@@ -349,6 +367,9 @@ async def discover_repos(client, cfg, log) -> dict:
                 stars=item.get("stargazers_count") or 0)
 
     while queue and len(repos) < cfg.max_repos_total:
+        if _cancelled():
+            log("[搜索] 收到取消请求，停止 README 顺藤摸瓜")
+            break
         full, kind = queue.pop(0)
         if full in repos or not _valid_repo(full):
             continue
@@ -562,17 +583,23 @@ async def inspect_url(client, cfg, url: str, origin: dict) -> dict:
     return d
 
 
-async def backfill_repo_dates(client, cfg, db, repos: dict, log=print) -> int:
+async def backfill_repo_dates(client, cfg, db, repos: dict, log=print, progress=None) -> int:
     """为收录行补 GitHub 仓库最后更新时间（pushed_at），作为可用性排序先验。
 
     搜索命中的仓库自带 pushed_at，直接采用；其余缺日期的来源仓库逐个查一次
     repo API（每仓库仅 1 次请求）。结果按 origin_repo 写到该仓库全部行。
     """
+    def _cancelled() -> bool:
+        return bool(getattr(progress, "cancelled", False))
+
     dates: dict = {full: (m.get("pushed_at") or "") for full, m in repos.items()}
     todo = {r["origin_repo"] for r in db.all_sources_rows()
             if r.get("origin_repo") and not r.get("repo_pushed_at")}
     todo -= {f for f, d in dates.items() if d}
     for full in sorted(todo):
+        if _cancelled():
+            log("[爬取] 收到取消请求，停止回填仓库更新时间")
+            break
         try:
             r = await client.get(f"https://api.github.com/repos/{full}",
                                  headers=_gh_headers(cfg))
@@ -600,11 +627,11 @@ async def run_crawl(cfg, db, log=print, progress=None):
              "cancelled": False}
     try:
         p.set_phase("discover", "正在发现仓库…")
-        repos = await discover_repos(client, cfg, log)
+        repos = await discover_repos(client, cfg, log, p)
         stats["repos"] = len(repos)
         log(f"[爬取] 待扫描仓库 {len(repos)} 个")
         # 仓库更新时间先行回填：即使本轮 URL 未重扫，排序信号也已就位
-        await backfill_repo_dates(client, cfg, db, repos, log)
+        await backfill_repo_dates(client, cfg, db, repos, log, p)
         p.update(repos_total=len(repos), repos_done=0,
                  urls_total=len(cfg.seed_urls), urls_done=0)
         p.set_phase("collect", f"扫描 {len(repos)} 个仓库")
@@ -712,6 +739,11 @@ async def run_crawl(cfg, db, log=print, progress=None):
         db.finish_run(run_id, now(), json.dumps(stats, ensure_ascii=False))
         log(f"[爬取] {'已取消' if p.cancelled else '完成'}: "
             f"{json.dumps({k: v for k, v in stats.items() if k != 'cancelled'}, ensure_ascii=False)}")
+    except asyncio.CancelledError:
+        # 被 /api/cancel 硬取消：补一条结束记录，否则 last_run 的 finished_at 一直是空的
+        db.finish_run(run_id, now(), json.dumps({"cancelled": True}, ensure_ascii=False))
+        log("[爬取] 已取消")
+        raise
     except Exception as e:
         db.finish_run(run_id, now(), json.dumps({"error": repr(e)}))
         log(f"[爬取] 异常退出: {e!r}")

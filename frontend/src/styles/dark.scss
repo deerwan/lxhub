@@ -1,0 +1,16 @@
+html.dark {
+  .app-wrapper {
+    background: var(--el-bg-color-page);
+  }
+
+  .navbar,
+  .tags-view {
+    background: var(--el-bg-color);
+    border-color: var(--el-border-color-darker);
+  }
+
+  /* nprogress 在暗色下默认偏灰，这里提亮一点 */
+  #nprogress .bar {
+    background: var(--el-color-primary);
+  }
+}

@@ -27,8 +27,7 @@ DEFAULTS = {
     "crawl_interval_hours": 24,
     # 复制链接时可拼接的加速前缀：[{"name":"","prefix":"https://gh1.lhl.one/","hosts":[...]}]
     "mirror_prefixes": [],
-    # 是否在前台首页显示「更新」按钮；关闭后只能从 /admin 触发爬取/检测
-    "show_update_button": True,
+
 }
 
 
@@ -50,7 +49,7 @@ class Config:
     check_interval_hours: float
     crawl_interval_hours: float
     mirror_prefixes: list
-    show_update_button: bool
+
 
 
 def _read_dotenv(path: Path) -> dict:

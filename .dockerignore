@@ -10,3 +10,9 @@ data/
 !.env.example
 docs/
 .github/
+
+# 前端：node_modules / dist / 测试产物都由 webui stage 重新生成，
+# 打进上下文只会白白增加几百 MB
+frontend/node_modules
+frontend/dist
+frontend/.playwright-cli

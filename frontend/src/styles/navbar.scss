@@ -1,0 +1,99 @@
+.navbar {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  /* 与 pure-admin 一致：顶栏自身不留内边距，由各按钮自带 padding 形成点击区，两端才能贴边 */
+  padding: 0;
+  overflow: hidden;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  .hamburger-container {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    height: 48px;
+    padding: 0 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--el-fill-color-light);
+    }
+  }
+
+  /* 面包屑：占据中间剩余空间，宽度不足时裁切而不是换行撑高顶栏 */
+  .breadcrumb-container {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+    margin-left: 16px;
+    overflow: hidden;
+    white-space: nowrap;
+
+    /* element-plus 默认给面包屑项加了 float，会让容器高度塌陷、
+       再被上面的 overflow: hidden 裁掉，这里整体改成 flex 布局 */
+    > span,
+    > div {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .el-breadcrumb__item {
+      display: inline-flex;
+      align-items: center;
+      float: none;
+      min-width: 0;
+    }
+
+    .el-breadcrumb__inner {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .el-breadcrumb__separator {
+      flex-shrink: 0;
+    }
+  }
+
+  .navbar-right {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 2px;
+    /* 面包屑在移动端不渲染，靠它把右侧操作区推到最右 */
+    margin-left: auto;
+  }
+
+  .navbar-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    cursor: pointer;
+    border-radius: 4px;
+
+    &:hover {
+      background: var(--el-fill-color-light);
+      color: var(--el-color-primary);
+    }
+  }
+
+  .navbar-user {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 48px;
+    padding: 0 10px 0 8px;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .navbar-username {
+    font-size: 13px;
+  }
+}

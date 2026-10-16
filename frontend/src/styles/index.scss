@@ -1,0 +1,123 @@
+@use 'reset';
+@use 'transition';
+@use 'sidebar';
+@use 'navbar';
+@use 'tags';
+@use 'dark';
+@use 'common';
+
+:root {
+  --lx-transition-duration: 0.3s;
+  /* 侧边栏宽度：由 `body[layout]` 与 `.hideSidebar` 覆盖 */
+  --lx-sidebar-width: 210px;
+}
+
+body[layout='vertical'] {
+  .app-wrapper {
+    --lx-sidebar-width: 210px;
+  }
+
+  .app-wrapper.hideSidebar {
+    --lx-sidebar-width: 54px;
+  }
+}
+
+/* 色觉辅助模式 */
+.html-grey {
+  filter: grayscale(100%);
+}
+
+.html-weakness {
+  filter: invert(80%);
+}
+
+.app-wrapper {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  background: var(--el-bg-color-page);
+
+  &::after {
+    display: table;
+    clear: both;
+    content: '';
+  }
+
+  &.mobile.openSidebar {
+    position: fixed;
+    top: 0;
+  }
+}
+
+.app-mask {
+  position: absolute;
+  top: 0;
+  z-index: 2001;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  opacity: 0.3;
+}
+
+.main-container {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  margin-left: var(--lx-sidebar-width);
+
+  /* 跟随侧边栏展开 / 折叠滑动 */
+  transition: margin-left var(--lx-transition-duration);
+
+  &.main-hidden {
+    margin-left: 0 !important;
+  }
+}
+
+/* 手机端：侧边栏以抽屉形式覆盖内容，折叠时整体移出视口 */
+.app-wrapper.mobile {
+  .main-container {
+    margin-left: 0 !important;
+  }
+
+  .sidebar-container {
+    z-index: 2001;
+    transition: transform var(--lx-transition-duration);
+  }
+
+  &.hideSidebar .sidebar-container {
+    pointer-events: none;
+    transform: translate3d(calc(-1 * var(--lx-sidebar-width)), 0, 0);
+  }
+}
+
+.fixed-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-main {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.main-content {
+  margin: 18px;
+}
+
+/* 顶部进度条 */
+#nprogress .bar {
+  background: var(--el-color-primary);
+}
+
+/* 消息提示 */
+.lxhub-message {
+  min-width: 200px;
+}

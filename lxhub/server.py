@@ -23,37 +23,22 @@ from .progress import Progress
 
 cfg = load_config()
 db = DB(cfg.db_path)
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Vue 前端（frontend/dist）产物目录：默认在仓库根 frontend/dist，可用环境变量覆盖
+WEBUI_DIST = Path(
+    os.environ.get("LXH_WEBUI_DIST")
+    or Path(__file__).resolve().parent.parent / "frontend" / "dist"
+)
 
-# ---------- HTML 静态资源缓存治理 ----------
-# HTML 里对 js/css 的引用带上文件 mtime 作为版本号（?v=...），
-# 文件一变 URL 就变，浏览器自然会拉新版本，不必手动改版本号。
-# HTML 本身回 no-cache，保证每次都能拿到引用了新 URL 的页面。
-_HTML_CACHE: dict[str, str] = {}
-
-
-def _load_html(name: str) -> str:
-    html = (STATIC_DIR / name).read_text(encoding="utf-8")
-
-    def _repl(m: re.Match) -> str:
-        path = m.group(1)
-        try:
-            ver = int((STATIC_DIR / path).stat().st_mtime)
-        except OSError:
-            ver = 0
-        return f"/static/{path}?v={ver}"
-
-    return re.sub(r"/static/([\w./-]+\.(?:js|css))", _repl, html)
-
-
-def _html(name: str) -> Response:
-    if name not in _HTML_CACHE:
-        try:
-            _HTML_CACHE[name] = _load_html(name)
-        except OSError:
-            return Response("页面缺失", status_code=500)
-    return Response(_HTML_CACHE[name], media_type="text/html; charset=utf-8",
-                    headers={"Cache-Control": "no-cache"})
+def _webui_index() -> Response:
+    """页面：返回 Vue 构建产物；未构建时提示构建命令。"""
+    index = WEBUI_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+    return Response(
+        "后台未构建：请在 frontend/ 目录执行 npm run build",
+        status_code=404,
+        media_type="text/html; charset=utf-8",
+    )
 
 # ---------- 后台管理（可选，由环境变量 LXH_ADMIN_USER / LXH_ADMIN_PASS 启用） ----------
 ADMIN_USER = os.environ.get("LXH_ADMIN_USER", "admin")
@@ -61,20 +46,6 @@ ADMIN_PASS = os.environ.get("LXH_ADMIN_PASS", "")
 SESSIONS: dict = {}
 SESSION_TTL = 8 * 3600
 OVERRIDE_PATH = Path(cfg.db_path).resolve().parent / "config.override.json"
-
-def _to_bool(v):
-    """把前端传来的 true/false/"true"/"1"/"on" 等统一转成 bool。"""
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, (int, float)):
-        return bool(v)
-    s = str(v).strip().lower()
-    if s in ("true", "1", "yes", "on"):
-        return True
-    if s in ("false", "0", "no", "off", ""):
-        return False
-    raise ValueError("必须是 true/false")
-
 
 # 网页后台可编辑的字段（github_token 亦可在此填写，但会明文落盘到数据卷）
 EDITABLE = {
@@ -91,7 +62,6 @@ EDITABLE = {
     "check_interval_hours": float,
     "crawl_interval_hours": float,
     "mirror_prefixes": list,
-    "show_update_button": _to_bool,
 }
 
 # 后台表单只填一个 URL，不填生效域名时的默认值：
@@ -192,7 +162,7 @@ def _safe_filename(name: str) -> str:
     return name[:80] or "source"
 
 
-STATE = {"busy": None}  # None | "crawl" | "check"
+STATE = {"busy": None, "task": None}  # None | "crawl" | "check"
 PROGRESS: Progress | None = None
 
 
@@ -213,6 +183,9 @@ async def _run_task(kind: str):
     if STATE["busy"]:
         return
     STATE["busy"] = kind
+    # 记住当前协程：/api/cancel 才能立刻中断进行中的 HTTP 请求，
+    # 否则只能等 discover / collect 阶段自己跑到下一个检查点
+    STATE["task"] = asyncio.current_task()
     PROGRESS = Progress(kind)
 
     def _log(msg: str):
@@ -224,12 +197,18 @@ async def _run_task(kind: str):
             await discover.run_crawl(cfg, db, log=_log, progress=PROGRESS)
         else:
             await checker.run_check(cfg, db, log=_log, progress=PROGRESS)
+    except asyncio.CancelledError:
+        # 取消动作已由 run_crawl / run_check 落库，这里只补日志。
+        # 不向上抛：本协程是任务终点，抛出去会让调用方跟着被取消
+        print(f"[任务] {kind} 已取消")
+        PROGRESS.log("任务已取消")
     except Exception as e:
         print(f"[任务] {kind} 失败: {e!r}")
         PROGRESS.log(f"任务失败: {e!r}")
     finally:
         PROGRESS.finished_at = time.time()
         STATE["busy"] = None
+        STATE["task"] = None
 
 
 async def _scheduler():
@@ -243,11 +222,13 @@ async def _scheduler():
             if crawl_run and not crawl_run["finished_at"] and _hours_since(crawl_run["started_at"]) < 6:
                 pass  # 上次爬取疑似未结束，等它
             elif not crawl_run or _hours_since(crawl_run["finished_at"] or crawl_run["started_at"]) >= cfg.crawl_interval_hours:
-                await _run_task("crawl")
+                # 包成独立 task：_run_task 里 asyncio.current_task() 拿到的才是它自己，
+                # 被 /api/cancel 取消时不会连调度器一起取消
+                await asyncio.create_task(_run_task("crawl"))
                 continue
             check_run = db.last_run("check")
             if not check_run or _hours_since(check_run["finished_at"] or check_run["started_at"]) >= cfg.check_interval_hours:
-                await _run_task("check")
+                await asyncio.create_task(_run_task("check"))
         except Exception as e:
             print(f"[定时器] {e!r}")
 
@@ -264,17 +245,17 @@ app = FastAPI(title="LX Source Hub", lifespan=lifespan)
 
 @app.get("/")
 async def index():
-    return _html("index.html")
+    return _webui_index()
 
 
 @app.get("/admin")
 async def admin_page():
-    return _html("admin.html")
+    return _webui_index()
 
 
 @app.get("/login")
 async def login_page():
-    return _html("admin.html")
+    return _webui_index()
 
 
 @app.get("/healthz")
@@ -302,7 +283,7 @@ async def api_status():
         "stats": db.stats(),
         "last_crawl": db.last_run("crawl"),
         "last_check": db.last_run("check"),
-        "show_update": cfg.show_update_button,
+
     }
 
 
@@ -318,8 +299,14 @@ async def api_cancel(req: Request):
     _check_admin(req)
     if not STATE["busy"]:
         raise HTTPException(409, "没有进行中的任务")
+    # 先置软取消标志：让任务在自己可控的检查点优雅退出
     if PROGRESS is not None:
         PROGRESS.cancelled = True
+    # 再硬取消：直接中断协程，立刻停止正在等待的 HTTP 请求。
+    # 只影响任务协程本身（_run_task 会吞掉 CancelledError），调度器不受牵连
+    task = STATE.get("task")
+    if task is not None and not task.done():
+        task.cancel()
     return {"ok": True}
 
 
@@ -482,4 +469,6 @@ def _ascii_fallback(name: str) -> str:
     return re.sub(r"[^\x20-\x7e]", "_", name) or "source.js"
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+if (WEBUI_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=WEBUI_DIST / "assets"), name="webui_assets")

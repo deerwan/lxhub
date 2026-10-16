@@ -1,0 +1,164 @@
+import { computed, ref } from 'vue'
+import { fetchSourceDetail, fetchSources, fetchStaticExport } from '@/api/sources'
+import { statusKey } from '@/utils/source'
+import { setupPrefixes } from '@/utils/prefix'
+import type { Source } from '@/types'
+
+export interface SortState {
+  key: string
+  dir: number
+}
+
+const SORT_KEY = 'lxh.sort'
+
+function loadSort(): SortState {
+  try {
+    const s = JSON.parse(localStorage.getItem(SORT_KEY) || 'null')
+    if (s && typeof s.key === 'string') return s as SortState
+  } catch {
+    return { key: '', dir: 1 }
+  }
+  return { key: '', dir: 1 }
+}
+
+const SORT_GET: Record<string, (s: Source) => string | number> = {
+  status: (s) => ['ok', 'down', 'unk', 'comp', 'dead'].indexOf(statusKey(s)),
+  name: (s) => (s.name || '').toLowerCase(),
+  plat: (s) => (s.platforms || []).join(','),
+  ver: (s) => s.version || '',
+  auth: (s) => (s.author || '').toLowerCase(),
+  upd: (s) => s.repo_pushed_at || s.content_updated_at || s.first_seen || '',
+}
+
+/** 音源列表：加载、筛选、排序，前台与后台「音源管理」共用 */
+export function useSources() {
+  const all = ref<Source[]>([])
+  const loading = ref(false)
+  const staticMode = ref(false)
+  const sort = ref<SortState>(loadSort())
+  const q = ref('')
+  const statusFilter = ref('all')
+  const typeFilter = ref('src')
+
+  async function load(): Promise<void> {
+    loading.value = true
+    try {
+      let data
+      try {
+        data = await fetchSources()
+        staticMode.value = false
+      } catch {
+        data = await fetchStaticExport()
+        staticMode.value = true
+      }
+      all.value = data.sources || []
+      setupPrefixes(data.mirror_prefixes)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function sortList(list: Source[]): Source[] {
+    const k = sort.value.key
+    const dir = sort.value.dir
+    const t = (s: Source) => s.repo_pushed_at || s.content_updated_at || s.first_seen || ''
+    if (!k) {
+      return [...list].sort(
+        (a, b) =>
+          Number(a.api_alive === 'down') - Number(b.api_alive === 'down') ||
+          Number(!!b.is_alive) - Number(!!a.is_alive) ||
+          Number(b.valid_tier === 'confirmed') - Number(a.valid_tier === 'confirmed') ||
+          (t(b) < t(a) ? -1 : t(b) > t(a) ? 1 : 0),
+      )
+    }
+    const get = SORT_GET[k] || (() => '')
+    return [...list].sort((a, b) => {
+      const x = get(a)
+      const y = get(b)
+      let c = 0
+      if (k === 'ver') c = String(x).localeCompare(String(y), undefined, { numeric: true })
+      else if (k !== 'no') c = x < y ? -1 : x > y ? 1 : 0
+      if (c === 0) c = Number(a.api_alive === 'down') - Number(b.api_alive === 'down')
+      return dir * c
+    })
+  }
+
+  const rows = computed<Source[]>(() => {
+    const st = statusFilter.value
+    const tp = typeFilter.value
+    const list = all.value.filter((s) => {
+      if (st === 'alive' && !s.is_alive) return false
+      if (st === 'dead' && s.is_alive) return false
+      if (st === 'down' && s.api_alive !== 'down') return false
+      if (tp === 'all') return true
+      if (!s.looks_valid) return false
+      if (tp === 'source') return s.script_type === 'source'
+      if (tp === 'unk') return s.script_type === 'unknown'
+      if (tp === 'src') return s.script_type !== 'companion'
+      return true
+    })
+    const sorted = sortList(list)
+    const query = q.value.trim()
+    if (/^\d+$/.test(query)) {
+      const n = parseInt(query, 10)
+      return n >= 1 && n <= sorted.length ? [{ ...sorted[n - 1], _no: n }] : []
+    }
+    let result = sorted
+    if (query) {
+      const ql = query.toLowerCase()
+      result = sorted.filter((s) => {
+        const hay =
+          (s.name || '') + ' ' + (s.author || '') + ' ' + (s.description || '') + ' ' + (s.url || '')
+        return hay.toLowerCase().includes(ql)
+      })
+    }
+    return result.map((s, i) => ({ ...s, _no: i + 1 }))
+  })
+
+  function onSortChange(prop: string, order: 'ascending' | 'descending' | null): void {
+    if (!order) {
+      sort.value = { key: '', dir: 1 }
+    } else if (prop === 'no') {
+      sort.value =
+        sort.value.key === 'no' && sort.value.dir === 1
+          ? { key: 'no', dir: -1 }
+          : { key: 'no', dir: order === 'descending' ? -1 : 1 }
+    } else {
+      sort.value = { key: prop, dir: order === 'descending' ? -1 : 1 }
+    }
+    try {
+      localStorage.setItem(SORT_KEY, JSON.stringify(sort.value))
+    } catch {
+      return
+    }
+  }
+
+  async function openDetail(id: number): Promise<Source | null> {
+    let s = all.value.find((x) => x.id === id)
+    if (!s) return null
+    if (!staticMode.value) {
+      try {
+        const d = await fetchSourceDetail(id)
+        d.mirrors = s.mirrors || []
+        s = d
+      } catch {
+        return null
+      }
+    }
+    return s
+  }
+
+  return {
+    all,
+    loading,
+    staticMode,
+    sort,
+    q,
+    statusFilter,
+    typeFilter,
+    rows,
+    load,
+    onSortChange,
+    openDetail,
+  }
+}

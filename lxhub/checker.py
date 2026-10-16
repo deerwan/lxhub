@@ -77,6 +77,13 @@ async def run_check(cfg, db, log=print, progress=None):
              "cancelled": p.cancelled}, ensure_ascii=False))
         log(f"[检测] {'已取消' if p.cancelled else '完成'}: "
             f"存活 {counters['alive']} / 失效 {counters['dead']} / 内容有更新 {counters['changed']}")
+    except asyncio.CancelledError:
+        # 被 /api/cancel 硬取消：补一条结束记录，否则 last_run 的 finished_at 一直是空的
+        db.finish_run(run_id, now(), json.dumps(
+            {"checked": counters["done"], "alive": counters["alive"],
+             "dead": counters["dead"], "cancelled": True}, ensure_ascii=False))
+        log("[检测] 已取消")
+        raise
     except Exception as e:
         db.finish_run(run_id, now(), json.dumps({"error": repr(e)}))
         log(f"[检测] 异常退出: {e!r}")
