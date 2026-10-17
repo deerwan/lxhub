@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import time
 import zipfile
 from contextlib import asynccontextmanager
@@ -360,6 +361,18 @@ async def api_source_detail(sid: int):
     return row
 
 
+def _probe_capability() -> dict:
+    """沙箱实测可用性（供 /api/status 暴露，前端据此禁用入口）。
+
+    只做存在性探测：/api/status 会被前端高频轮询，起子进程查版本成本太高。
+    版本下限（≥20）校验放在 run_probe 每轮开始时做一次，见 probe/__init__.py。
+    """
+    node = str((cfg.probe or {}).get("node") or "node")
+    if shutil.which(node):
+        return {"available": True, "node": node, "reason": None}
+    return {"available": False, "node": node, "reason": "node-not-found"}
+
+
 @app.get("/api/status")
 async def api_status():
     return {
@@ -368,6 +381,7 @@ async def api_status():
         "last_crawl": db.last_run("crawl"),
         "last_check": db.last_run("check"),
         "last_probe": db.last_run("probe"),
+        "probe_capability": _probe_capability(),
     }
 
 
@@ -417,7 +431,9 @@ async def api_probe(req: Request):
     """手动触发一轮沙箱实测。
 
     不要求 probe.enabled：开关只控制「定时任务 + 检测后自动补测」，
-    后台手动点按钮即视为明确意图。未配置 Node 时按 not-loadable 落库，不影响服务。
+    后台手动点按钮即视为明确意图。运行环境缺 Node（或版本 <20）时
+    run_probe 会整轮跳过、不落库，不会把可用音源误判为失效；
+    可用性通过 /api/status 的 probe_capability 暴露给前端。
     """
     _check_admin(req)
     if STATE["busy"]:

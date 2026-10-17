@@ -32,8 +32,8 @@
 1. 后台页「配置管理 → 沙箱实测」打开「启用沙箱实测」并可顺带设置定时周期（推荐）；
 2. 或直接在 `config.json` / `data/config.override.json` 加 `"probe": { "enabled": true }`。
 
-前提确认本机装有 Node ≥ 20（`node -v`）。手动点「沙箱实测」按钮或
-`python main.py probe --yes` 不受该开关限制。
+前提确认运行环境装有 Node ≥ 20（`node -v`；官方 Docker 镜像已内置，源码裸机部署需自行安装）。
+手动点「沙箱实测」按钮或 `python main.py probe --yes` 不受该开关限制。
 
 ## 静态模式下按钮是灰的？
 

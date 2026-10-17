@@ -24,7 +24,8 @@ Node 沙箱（node `vm` + 全局 `lx` 环境模拟）真实运行一次，看其
 - 结果分级 `usable / degraded / not-loadable`，配合各平台失败原因逐一展示；
 - 支持 `deep` 模式对 flac/flac24bit 声明做音质核验（Bitrate/采样率/位深）；
 - 默认 `probe.enabled=false`；**后台「配置管理 → 沙箱实测」可一键开关并设置定时任务**
-  （保存即生效，无需重启），开启需本机有 Node ≥20；详见 [沙箱实测](docs/probe.md)。
+  （保存即生效，无需重启），开启需运行环境有 Node ≥20（官方 Docker 镜像已内置，
+  源码裸机部署需自行安装）；详见 [沙箱实测](docs/probe.md)。
 
 ## 文档
 

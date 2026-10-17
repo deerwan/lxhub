@@ -47,6 +47,13 @@ export interface ProbeDetail {
   updateAlert?: { version?: string; log?: string } | null
 }
 
+/** 沙箱实测可用性（/api/status.probe_capability）：缺 Node 时前端禁用入口 */
+export interface ProbeCapability {
+  available: boolean
+  node?: string
+  reason?: string | null
+}
+
 export interface StatusResp {
   busy: 'crawl' | 'check' | 'probe' | null
   stats: {
@@ -60,6 +67,7 @@ export interface StatusResp {
   last_crawl: RunInfo | null
   last_check: RunInfo | null
   last_probe: RunInfo | null
+  probe_capability?: ProbeCapability
 }
 
 export interface ProgressStats {

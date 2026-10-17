@@ -10,7 +10,7 @@ defineOptions({ name: 'AdminConfigProbe' })
       type="warning"
       show-icon
       :closable="false"
-      title="沙箱实测会把收录的音源脚本放进 Node 沙箱真实取歌一次（固定测试歌曲，仅测可用性）。原理与风险说明见 docs/probe.md；手动触发请到「概览」页点「沙箱实测」"
+      title="沙箱实测会把收录的音源脚本放进 Node 沙箱真实取歌一次（固定测试歌曲，仅测可用性），需运行环境已安装 Node ≥20（官方 Docker 镜像已内置）。原理与风险说明见 docs/probe.md；手动触发请到「概览」页点「沙箱实测」"
       style="margin-bottom: 14px"
     />
     <ConfigForm group-key="probe" />

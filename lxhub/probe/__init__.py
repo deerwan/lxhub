@@ -60,6 +60,24 @@ async def probe_one(cfg, path: str, deep: bool) -> dict:
                 "platforms": {}, "updateAlert": None}
 
 
+async def _node_version_ok(node: str) -> tuple[bool, str]:
+    """node -v 一次性校验（每轮一次，成本可忽略）。
+
+    存在但版本 <20 时同样整轮跳过：老 Node 跑不动 worker（vm/fetch 等特性
+    缺失），逐条探测只会全部 not-loadable，与"找不到 Node"同样处理。
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            node, "-v", stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT)
+        out, _ = await proc.communicate()
+        ver = (out or b"").decode("utf-8", "ignore").strip()
+        major = int(ver.lstrip("vV").split(".")[0] or 0)
+        return major >= 20, ver
+    except (OSError, ValueError):
+        return False, ""
+
+
 async def run_probe(cfg, db, log=print, progress=None, limit=None, deep=None) -> dict:
     p = progress or NoOpProgress()
     if not cfg.probe.get("enabled"):
@@ -67,9 +85,14 @@ async def run_probe(cfg, db, log=print, progress=None, limit=None, deep=None) ->
         return {"skipped": True}
     # Docker 等运行环境可能没有 Node：此时整轮跳过、不落库。
     # 若强行逐条探测会全部 not-loadable，失败连击会导致 prune 误删真实可用音源
-    if not shutil.which(str(cfg.probe.get("node") or "node")):
+    node_bin = str(cfg.probe.get("node") or "node")
+    if not shutil.which(node_bin):
         log(f"[实测] 跳过：找不到 Node 可执行文件（{cfg.probe.get('node')!r}）"
             "——容器部署需在镜像内安装 Node ≥20，或关闭沙箱实测")
+        return {"skipped": True}
+    ver_ok, ver = await _node_version_ok(node_bin)
+    if not ver_ok:
+        log(f"[实测] 跳过：Node 版本不满足要求（检测到 {ver or '未知版本'}），需要 ≥20")
         return {"skipped": True}
     limit = int(limit) if limit else int(cfg.probe["max_per_run"])
     if deep is None:
