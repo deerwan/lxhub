@@ -1,5 +1,6 @@
 import Layout from '@/layout/index.vue'
 import {
+  Cpu,
   Files,
   Fold,
   HomeFilled,
@@ -90,6 +91,17 @@ export default {
           meta: {
             title: '定时任务',
             icon: Timer,
+            keepAlive: true,
+            auths: ['config:save'],
+          },
+        },
+        {
+          path: '/admin/config/probe',
+          name: 'AdminConfigProbe',
+          component: () => import('@/views/admin/config/probe.vue'),
+          meta: {
+            title: '沙箱实测',
+            icon: Cpu,
             keepAlive: true,
             auths: ['config:save'],
           },

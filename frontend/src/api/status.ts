@@ -1,7 +1,7 @@
 import { HttpError, http } from '@/utils/http'
 import type { ProgressSnapshot, StatusResp } from '@/types'
 
-export type TaskKind = 'crawl' | 'check'
+export type TaskKind = 'crawl' | 'check' | 'probe'
 export type TaskTriggerResult = 'started' | 'busy' | 'failed'
 
 export function fetchStatus(): Promise<StatusResp> {

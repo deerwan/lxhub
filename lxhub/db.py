@@ -63,15 +63,25 @@ def _ver_key(d: dict) -> str:
 
 
 def _group_rank(d: dict) -> tuple:
-    """同名组内主记录优劣：高置信 > 存活 > 版本更新 > 最近存活 > 路径短。
+    """同名组内主记录优劣：高置信 > 实测可用 > 存活 > 版本更新 > 最近存活 > 路径短。
 
     版本优先于最近存活时间：复检时间只取决于检测顺序，不能反映脚本新旧。
     """
     return (d.get("valid_tier") == "confirmed",
+            _probe_rank(d.get("probe_status") or ""),
             1 if d.get("is_alive") else 0,
             _ver_key(d),
             d.get("last_alive") or "",
             -len(d.get("url") or ""))
+
+
+def _probe_rank(status: str) -> int:
+    """实测状态排序权重（reverse=True 高者优先）：usable=2 > 未测=1 > 失败=0。"""
+    if status == "usable":
+        return 2
+    if not status:
+        return 1
+    return 0
 
 
 SCHEMA = """
@@ -102,7 +112,12 @@ CREATE TABLE IF NOT EXISTS sources (
     first_seen TEXT DEFAULT '',
     last_checked TEXT DEFAULT '',
     last_alive TEXT DEFAULT '',
-    content_updated_at TEXT DEFAULT ''
+    content_updated_at TEXT DEFAULT '',
+    probe_status TEXT DEFAULT '',
+    probe_detail TEXT DEFAULT '',
+    probe_sha TEXT DEFAULT '',
+    probe_fail_streak INTEGER DEFAULT 0,
+    probe_checked TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_sources_alive ON sources(is_alive, looks_valid);
 CREATE TABLE IF NOT EXISTS runs (
@@ -229,7 +244,12 @@ class DB:
                 ("valid_tier", "TEXT DEFAULT ''"),
                 ("api_down_streak", "INTEGER DEFAULT 0"),
                 ("repo_pushed_at", "TEXT DEFAULT ''"),
-                ("content_updated_at", "TEXT DEFAULT ''")):
+                ("content_updated_at", "TEXT DEFAULT ''"),
+                ("probe_status", "TEXT DEFAULT ''"),
+                ("probe_detail", "TEXT DEFAULT ''"),
+                ("probe_sha", "TEXT DEFAULT ''"),
+                ("probe_fail_streak", "INTEGER DEFAULT 0"),
+                ("probe_checked", "TEXT DEFAULT ''")):
             if col not in cols:
                 try:
                     conn.execute(f"ALTER TABLE sources ADD COLUMN {col} {ddl}")
@@ -275,6 +295,11 @@ class DB:
             d["platforms"] = json.loads(d.get("platforms") or "[]")
         except json.JSONDecodeError:
             d["platforms"] = []
+        if d.get("probe_detail"):
+            try:
+                d["probe_detail"] = json.loads(d["probe_detail"])
+            except (json.JSONDecodeError, TypeError):
+                d["probe_detail"] = {}
         d["is_alive"] = bool(d["is_alive"])
         d["looks_valid"] = bool(d["looks_valid"])
         if not with_content:
@@ -285,7 +310,11 @@ class DB:
         sql = "SELECT * FROM sources"
         if valid_only:
             sql += " WHERE looks_valid = 1"
-        sql += " ORDER BY is_alive DESC, looks_valid DESC, valid_tier DESC, last_alive DESC, first_seen DESC LIMIT ?"
+        sql += (
+            " ORDER BY is_alive DESC, looks_valid DESC, valid_tier DESC,"
+            " CASE probe_status WHEN 'usable' THEN 0 WHEN '' THEN 2 ELSE 1 END,"
+            " last_alive DESC, first_seen DESC LIMIT ?"
+        )
         rows = [self._to_source_dict(r) for r in self._run(sql, (limit,))]
         # 同内容多仓库镜像合并：保留一条主记录，其余记入 mirrors
         merged: list = []
@@ -315,7 +344,8 @@ class DB:
             head = g[0][1]
             head["variants"] = [
                 {k: v.get(k) for k in ("url", "origin_repo", "origin_url", "version",
-                                       "valid_tier", "is_alive", "last_alive", "mirrors")}
+                                       "valid_tier", "is_alive", "last_alive", "mirrors",
+                                       "probe_status", "probe_checked")}
                 for _, v in g[1:]]
             skip.update(i for i, _ in g[1:])
         return [d for i, d in enumerate(merged) if i not in skip]
@@ -418,6 +448,42 @@ class DB:
             " WHERE id = ?",
             (alive, checked_at, alive, sid))
 
+    def update_probe(self, sid: int, status: str, detail: str, sha: str, checked_at: str):
+        """记录沙箱实测结果；失败连击仅对 degraded/not-loadable 累加， usable 清零。"""
+        fail = status in ("degraded", "not-loadable")
+        self._run(
+            "UPDATE sources SET probe_status = ?, probe_detail = ?, probe_sha = ?,"
+            " probe_checked = ?, probe_fail_streak = CASE WHEN ? = 1"
+            " THEN probe_fail_streak + 1 ELSE 0 END WHERE id = ?",
+            (status, detail, sha, checked_at, 1 if fail else 0, sid))
+
+    def probe_candidates(self, refresh_hours: float, limit: int) -> list:
+        """待实测行：有效音源 +（未测/内容变更/超过 refresh_hours）。
+
+        失败连击达上限（4，与 prune_dead_backends 一致）的行不再排队，
+        避免手动/定时轮反复消耗死源；它们会在下一轮复检后被 prune 清出。
+        """
+        cutoff = (dt.datetime.now(dt.timezone.utc)
+                  - dt.timedelta(hours=refresh_hours)).isoformat(timespec="seconds")
+        rows = self._run(
+            """SELECT id, url, name, sha256, probe_status, probe_detail,
+                      probe_sha, probe_checked, probe_fail_streak, valid_tier
+               FROM sources
+               WHERE is_alive = 1 AND looks_valid = 1 AND probe_fail_streak < 4
+               ORDER BY CASE probe_status WHEN '' THEN 0 ELSE 1 END, last_checked ASC
+               LIMIT 2000""")
+        out = []
+        for r in rows:
+            # 未测过 / probe 结果早于 refresh 窗口 / 内容已更新（probe_sha 与当前 sha 不符）→ 重测
+            fresh = (r["probe_status"] != "" and r["probe_sha"]
+                     and r["probe_sha"] == (r["sha256"] or "")
+                     and (r["probe_checked"] or "") >= cutoff)
+            if not fresh:
+                out.append(dict(r))
+                if len(out) >= limit:
+                    break
+        return out
+
     def set_repo_pushed_at(self, repo: str, pushed_at: str):
         """把 GitHub 仓库最后更新时间写到该仓库收录的全部行（排序可用性先验）。"""
         self._run("UPDATE sources SET repo_pushed_at = ? WHERE origin_repo = ?",
@@ -429,10 +495,14 @@ class DB:
         探测是根路径 ping：拿不到任何 HTTP 响应（DNS 失败/超时/拒连）才计「挂」。
         默认 8 轮按 12h 复检间隔约 4 天，足以排除临时网络抖动；清掉的是
         "链接活着但音源早已废弃"的僵尸记录。
+        实测可用（probe_status='usable'）的记录永不清理：它有比后端 ping 更强的
+        存活证据。另附实测失败连击达 probe_min_streak 的记录一并清理。
         """
         with _LOCK:
             cur = self._c.conn.execute(
-                "DELETE FROM sources WHERE looks_valid = 1 AND api_down_streak >= ?",
+                """DELETE FROM sources WHERE looks_valid = 1 AND (
+                       (api_down_streak >= ? AND probe_status != 'usable')
+                       OR probe_fail_streak >= 4)""",
                 (min_streak,))
             self._c.conn.commit()
             return cur.rowcount
@@ -442,7 +512,10 @@ class DB:
             """SELECT COUNT(*) AS total,
                       COALESCE(SUM(is_alive), 0) AS alive,
                       COALESCE(SUM(looks_valid), 0) AS valid,
-                      COALESCE(SUM(CASE WHEN looks_valid = 1 AND is_alive = 1 THEN 1 ELSE 0 END), 0) AS valid_alive
+                      COALESCE(SUM(CASE WHEN looks_valid = 1 AND is_alive = 1 THEN 1 ELSE 0 END), 0) AS valid_alive,
+                      COALESCE(SUM(CASE WHEN probe_status = 'usable' THEN 1 ELSE 0 END), 0) AS probe_usable,
+                      COALESCE(SUM(CASE WHEN probe_status = 'degraded' THEN 1 ELSE 0 END), 0) AS probe_degraded,
+                      COALESCE(SUM(CASE WHEN probe_status = 'not-loadable' THEN 1 ELSE 0 END), 0) AS probe_not_loadable
                FROM sources""")
         d = dict(rows[0])
         return {k: int(v) for k, v in d.items()}

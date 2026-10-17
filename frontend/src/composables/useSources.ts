@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { fetchSourceDetail, fetchSources, fetchStaticExport } from '@/api/sources'
-import { statusKey } from '@/utils/source'
+import { PROBE_RANK, probeKey, statusKey } from '@/utils/source'
 import { setupPrefixes } from '@/utils/prefix'
 import type { Source } from '@/types'
 
@@ -28,6 +28,7 @@ const SORT_GET: Record<string, (s: Source) => string | number> = {
   ver: (s) => s.version || '',
   auth: (s) => (s.author || '').toLowerCase(),
   upd: (s) => s.repo_pushed_at || s.content_updated_at || s.first_seen || '',
+  probe: (s) => PROBE_RANK[probeKey(s)],
 }
 
 /** 音源列表：加载、筛选、排序，前台与后台「音源管理」共用 */
@@ -68,6 +69,7 @@ export function useSources() {
           Number(a.api_alive === 'down') - Number(b.api_alive === 'down') ||
           Number(!!b.is_alive) - Number(!!a.is_alive) ||
           Number(b.valid_tier === 'confirmed') - Number(a.valid_tier === 'confirmed') ||
+          PROBE_RANK[probeKey(a)] - PROBE_RANK[probeKey(b)] ||
           (t(b) < t(a) ? -1 : t(b) > t(a) ? 1 : 0),
       )
     }
@@ -90,6 +92,9 @@ export function useSources() {
       if (st === 'alive' && !s.is_alive) return false
       if (st === 'dead' && s.is_alive) return false
       if (st === 'down' && s.api_alive !== 'down') return false
+      if (st === 'probegood' && probeKey(s) !== 'usable') return false
+      if (st === 'probebad' && !['degraded', 'not-loadable'].includes(probeKey(s)))
+        return false
       if (tp === 'all') return true
       if (!s.looks_valid) return false
       if (tp === 'source') return s.script_type === 'source'

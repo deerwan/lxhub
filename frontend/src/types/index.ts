@@ -24,11 +24,42 @@ export interface RunInfo {
   finished_at?: string
 }
 
+/** 单个平台实测结果（Node 沙箱 worker 产出） */
+export interface ProbeRes {
+  status: 'usable' | 'failed' | 'skipped'
+  ms?: number
+  bitrate?: number
+  duration?: number
+  format?: string
+  spec?: string
+  quality?: 'matched' | 'degraded' | 'mismatch' | 'refused' | 'unknown'
+  reason?: string
+  message?: string
+  url?: string
+}
+
+/** 一条音源的完整实测结果 JSON（存 probe_detail） */
+export interface ProbeDetail {
+  status: 'usable' | 'degraded' | 'not-loadable'
+  declared?: string[]
+  platforms?: Record<string, ProbeRes>
+  loadError?: string
+  updateAlert?: { version?: string; log?: string } | null
+}
+
 export interface StatusResp {
-  busy: 'crawl' | 'check' | null
-  stats: { total: number; alive: number; valid: number }
+  busy: 'crawl' | 'check' | 'probe' | null
+  stats: {
+    total: number
+    alive: number
+    valid: number
+    probe_usable?: number
+    probe_degraded?: number
+    probe_not_loadable?: number
+  }
   last_crawl: RunInfo | null
   last_check: RunInfo | null
+  last_probe: RunInfo | null
 }
 
 export interface ProgressStats {
@@ -41,11 +72,14 @@ export interface ProgressStats {
   new?: number | null
   alive?: number | null
   dead?: number | null
+  usable?: number | null
+  degraded?: number | null
+  not_loadable?: number | null
 }
 
 export interface ProgressSnapshot {
   running: boolean
-  kind: 'crawl' | 'check' | null
+  kind: 'crawl' | 'check' | 'probe' | null
   cancelled?: boolean
   message?: string
   elapsed?: number
@@ -79,6 +113,10 @@ export interface Source {
   repo_pushed_at?: string
   last_checked?: string
   last_alive?: string
+  probe_status?: 'usable' | 'degraded' | 'not-loadable' | ''
+  probe_detail?: ProbeDetail | { [k: string]: unknown }
+  probe_checked?: string
+  probe_fail_streak?: number
   content_text?: string
   _no?: number
 }

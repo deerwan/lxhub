@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { CircleClose, Refresh, Search } from '@element-plus/icons-vue'
+import { CircleClose, DataAnalysis, Refresh, Search } from '@element-plus/icons-vue'
 import { cancelTask, fetchStatus, startTask, type TaskKind } from '@/api/status'
 import { useProgress } from '@/composables/useProgress'
 import { useStats } from '@/composables/useStats'
@@ -19,7 +19,7 @@ async function run(kind: TaskKind): Promise<void> {
   const r = await startTask(kind)
   if (r === 'busy') message('已有任务在进行中', { type: 'warning' })
   else if (r === 'failed') message('触发失败（服务未运行?）', { type: 'error' })
-  else message('任务已开始', { type: 'success' })
+  else message(kind === 'probe' ? '实测已开始' : '任务已开始', { type: 'success' })
   await start()
   taskBusy.value = false
 }
@@ -54,6 +54,9 @@ onMounted(async () => {
           立即爬取
         </el-button>
         <el-button :icon="Refresh" :loading="taskBusy" @click="run('check')">重新检测</el-button>
+        <el-button type="success" :icon="DataAnalysis" :loading="taskBusy" @click="run('probe')">
+          沙箱实测
+        </el-button>
         <el-button :icon="CircleClose" :loading="taskBusy" @click="cancel">取消任务</el-button>
       </div>
     </el-card>

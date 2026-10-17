@@ -1,3 +1,5 @@
+import type { ProbeDetail, ProbeRes, Source } from '@/types'
+
 export const PLAT: Record<string, string> = {
   kw: '酷我',
   wy: '网易云',
@@ -40,6 +42,72 @@ export function statusKey(s: {
   if (s.script_type === 'companion') return 'comp'
   if (s.script_type === 'unknown') return 'unk'
   return 'ok'
+}
+
+/** 实测结果标签：usable / degraded / not-loadable / 未测（none） */
+export type ProbeKey = 'usable' | 'degraded' | 'not-loadable' | 'none'
+
+export const PROBE_TXT: Record<string, string> = {
+  usable: '实测可用',
+  degraded: '实测降级',
+  'not-loadable': '实测失败',
+  none: '未实测',
+}
+
+/** 沙箱实测的排序/展示优先级：可用 > 降级 > 未测 > 失败 */
+export function probeKey(
+  s: Pick<Source, 'probe_status' | 'is_alive'> | null,
+): ProbeKey {
+  const v = s?.probe_status
+  if (v === 'usable') return 'usable'
+  if (v === 'degraded') return 'degraded'
+  if (v === 'not-loadable') return 'not-loadable'
+  return 'none'
+}
+
+export const PROBE_TAG: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
+  usable: 'success',
+  degraded: 'warning',
+  'not-loadable': 'danger',
+  none: 'info',
+}
+
+export const PROBE_RANK: Record<ProbeKey, number> = {
+  usable: 0,
+  degraded: 1,
+  none: 2,
+  'not-loadable': 3,
+}
+
+/** 实测 tooltip 明细：逐平台一行；失败展示原因；含 L2 音质标注 */
+export function probeTip(s: Source): string {
+  const d = s.probe_detail as ProbeDetail | undefined
+  if (probeKey(s) === 'none' || !d) return '尚未进行沙箱实测'
+  const bits: string[] = []
+  if (s.probe_checked && typeof s.probe_checked === 'string') {
+    bits.push(`实测时间 ${s.probe_checked.replace('T', ' ')}`)
+  }
+  if (d.updateAlert?.log) bits.push(`⚠ ${d.updateAlert.log}`)
+  const plats = d.declared || Object.keys(d.platforms || {})
+  for (const k of plats) {
+    const r: ProbeRes | undefined = d.platforms?.[k]
+    const name = PLAT[k] || k
+    if (!r || r.status === 'skipped') {
+      bits.push(`${name}：未测`)
+    } else if (r.status === 'usable') {
+      const q = r.quality && r.quality !== 'unknown' ? ` · 音质${qLabel(r.quality)}` : ''
+      const spec = r.spec ? ` · ${r.spec}` : ''
+      bits.push(`${name}：✓ ${r.message || '真实音频'}${spec}${q}`)
+    } else {
+      bits.push(`${name}：✗ ${r.reason || r.message || '失败'}`)
+    }
+  }
+  if (d.loadError) bits.push(`脚本: ${d.loadError}`)
+  return bits.join('\n')
+}
+
+function qLabel(q: string): string {
+  return { matched: '达标', degraded: '降级', mismatch: '异常', refused: '拒绝核验' }[q] || q
 }
 
 export function parseHosts(s: { api_hosts?: string | string[] }): string[] {

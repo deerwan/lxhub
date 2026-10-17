@@ -28,6 +28,12 @@ def main():
 
     sub.add_parser("check", help="手动复检一次可用性")
 
+    p_probe = sub.add_parser("probe", help="沙箱实测音源可用性（需 Node >=20，probe.enabled=true）")
+    p_probe.add_argument("--limit", type=int, help="本轮最多探测多少条")
+    p_probe.add_argument("--deep", action="store_true", help="附带音质核验（flac/flac24bit）")
+    p_probe.add_argument("--yes", action="store_true",
+                         help="绕过 probe.enabled 开关（手动执行时明确放行）")
+
     p_exp = sub.add_parser("export", help="导出 JSON")
     p_exp.add_argument("--out", default="export.json")
 
@@ -51,6 +57,12 @@ def main():
     elif args.cmd == "check":
         from lxhub.checker import run_check
         asyncio.run(run_check(cfg, db))
+    elif args.cmd == "probe":
+        from lxhub.probe import run_probe
+        if args.yes:
+            cfg.probe["enabled"] = True
+        asyncio.run(run_probe(cfg, db, limit=args.limit,
+                              deep=True if args.deep else None))
     elif args.cmd == "export":
         Path(args.out).write_text(
             json.dumps(db.export(cfg.mirror_prefixes), ensure_ascii=False, indent=1),

@@ -38,13 +38,14 @@ python3.12 -m venv .venv
 | `python main.py serve [--host H] [--port P]` | 启动 Web 服务（内置定时任务） |
 | `python main.py crawl [--export FILE]` | 手动爬取一次 |
 | `python main.py check` | 手动复检一次可用性 |
+| `python main.py probe [--deep] [--limit N] --yes` | 手动沙箱实测（需 Node ≥20，`--yes` 放行 probe.enabled 开关） |
 | `python main.py export [--out FILE]` | 导出 JSON |
 
 ## 页面功能
 
 - 每行带顺序编号（1、2、3…，随排序/筛选变化，输入纯数字可跳到对应行）
-- 搜索 / 过滤（状态：全部 / 可访问 / 后端挂 / 失效；类型：音源与存疑 / 仅音源 / 仅存疑 / 全部）
-- 排序：点表头列（名称 / 平台 / 版本 / 作者 / 更新）；默认「可用优先 + 最近更新优先」，选择记在浏览器 localStorage
+- 搜索 / 过滤（状态：全部 / 可访问 / 后端挂 / 失效 / 实测可用 / 实测异常；类型：音源与存疑 / 仅音源 / 仅存疑 / 全部）
+- 排序：点表头列（名称 / 平台 / 版本 / 作者 / 更新 / 实测）；默认「可用优先 + 实测可用优先 + 最近更新优先」，选择记在浏览器 localStorage
 - 单条复制链接
 - 详情（脚本头预览）
 - 导出 TXT（每行一条链接，范围受当前筛选影响；开启加速前缀时自动拼接）

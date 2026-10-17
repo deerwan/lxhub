@@ -37,6 +37,8 @@ function onPrefixSelect(): void {
         <el-option label="可访问" value="alive" />
         <el-option label="后端挂" value="down" />
         <el-option label="失效" value="dead" />
+        <el-option label="实测可用" value="probegood" />
+        <el-option label="实测异常" value="probebad" />
       </el-select>
       <el-select v-model="type" style="width: 140px">
         <el-option label="音源与存疑" value="src" />

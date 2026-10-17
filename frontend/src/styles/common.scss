@@ -274,3 +274,9 @@
   width: 100%;
   margin-top: 12px;
 }
+
+// 实测明细 tooltip：纯文本多行展示（不用 raw-content，防脚本内容注入 XSS）
+.probe-tip-popper {
+  max-width: 420px;
+  white-space: pre-line;
+}

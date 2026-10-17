@@ -52,6 +52,10 @@
   **不调用任何取歌接口**），所有**有效音源**都会探测（含结构不全/混淆判定的）；
   所有后端均不可达时标「后端·挂」，该源大概率已不可用；
   连续多轮（默认 8 轮，约 4 天）后端全部不可达的音源视同已废弃，自动清出列表；
+- 可选的「沙箱实测」（默认关闭，见 [probe 文档](probe.md)）：在以上静态链路之后，
+  把脚本放进 Node 沙箱真实取歌一次，产出 `usable / degraded / not-loadable` 三个级别
+  与逐平台失败原因；实测结果会参与排序（可用 > 未测 > 失败）。
+  复检定时任务完成后会自动对「内容更新/未测/缓存过期」的条目补测。
 - 「仓库更新时间」= 来源仓库在 GitHub 的最后 push 时间（搜索结果自带，缺失时
   逐仓库查 repo API 补齐）。「更新」列与默认排序都以它为准——长期不维护的仓库，
   其音源后端大概率已失效，会自动沉底；悬停可看 内容更新/最近检测 时间；
@@ -73,14 +77,17 @@ trees API 不依赖 release，但要消耗核心 API 配额，因此需要 Token
 ## 代码结构
 
 ```
-main.py              CLI 入口：serve / crawl / check / export
+main.py              CLI 入口：serve / crawl / check / probe / export
 lxhub/
   config.py          配置：默认值 <- config.json <- .env <- 环境变量
   discover.py        发现仓库 → 收集 .js 候选 → 抓取静态解析 → 入库
   fetcher.py         httpx 封装：流式限大小 GET、后端域名存活探测
   metadata.py        @注释元数据、音源特征评分、类型分类、平台猜测
-  checker.py         复检链接存活 + 后端探测
-  db.py              SQLite 存储 + 镜像合并 + 失效清理
+  checker.py         复检链接存活 + 后端探测（收尾可自动接沙箱实测）
+  probe/             沙箱实测调度器
+    node/env.mjs     lx 全局环境模拟（fetch/crypto/zlib/Buffer… + 私网防护）
+    node/probe.mjs   独立 worker：vm 沙箱执行脚本 → 取链 → Range/魔数核验 + L2 音质
+  db.py              SQLite 存储 + 镜像合并 + 失效清理（含 probe_* 列）
   progress.py        任务进度 / 日志环形缓冲 / 取消标记
   server.py          FastAPI 路由 + 内置定时调度器
 ```

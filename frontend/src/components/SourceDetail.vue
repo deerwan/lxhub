@@ -4,6 +4,9 @@ import {
   baseName,
   parseHosts,
   PLAT,
+  PROBE_TAG,
+  PROBE_TXT,
+  probeKey,
   STATUS_TXT,
   TAG_TYPE,
   statusKey,
@@ -12,7 +15,7 @@ import {
 import { fmtFull, fmtSize } from '@/utils/format'
 import { withPrefix } from '@/utils/prefix'
 import { copyText } from '@/utils/clipboard'
-import type { Source } from '@/types'
+import type { ProbeDetail, ProbeRes, Source } from '@/types'
 
 const props = defineProps<{ source: Source | null; no?: number | null }>()
 const visible = defineModel<boolean>({ default: false })
@@ -56,6 +59,61 @@ const typeText = computed(() => {
 
 const mirrors = computed(() => props.source?.mirrors || [])
 const variants = computed(() => props.source?.variants || [])
+
+const probeDetail = computed(() => {
+  const d = props.source?.probe_detail
+  return d && typeof d === 'object' ? (d as ProbeDetail) : null
+})
+const probedAt = computed(() => {
+  const v = props.source?.probe_checked
+  return typeof v === 'string' ? fmtFull(v) : ''
+})
+
+interface ProbeLine {
+  key: string
+  name: string
+  res: ProbeRes | null
+  tag: 'success' | 'warning' | 'danger' | 'info'
+  text: string
+}
+
+function lineText(r: ProbeRes): string {
+  if (r.status === 'usable') {
+    const bits = [r.message || '返回真实音频']
+    if (r.spec) bits.push(r.spec)
+    if (r.quality && r.quality !== 'unknown') {
+      bits.push(
+        '音质' +
+          ({ matched: '达标', degraded: '降级', mismatch: '异常', refused: '被拒绝核验' }[r.quality] ||
+            r.quality),
+      )
+    }
+    if (r.ms) bits.push(`耗时 ${r.ms}ms`)
+    return bits.join(' · ')
+  }
+  return r.reason || r.message || '失败'
+}
+
+const probeLines = computed<ProbeLine[]>(() => {
+  const d = probeDetail.value
+  if (!d) return []
+  const keys = d.declared?.length ? d.declared : Object.keys(d.platforms || {})
+  return keys.map((k) => {
+    const r = d.platforms?.[k] || null
+    let tag: ProbeLine['tag'] = 'info'
+    let text = '未测'
+    if (r && r.status !== 'skipped') {
+      if (r.status === 'usable') {
+        tag = 'success'
+        text = lineText(r)
+      } else {
+        tag = 'danger'
+        text = lineText(r)
+      }
+    }
+    return { key: k, name: PLAT[k] || k, res: r, tag, text }
+  })
+})
 </script>
 
 <template>
@@ -76,6 +134,39 @@ const variants = computed(() => props.source?.variants || [])
       <el-descriptions-item label="后端">{{ apiText }}</el-descriptions-item>
       <el-descriptions-item label="类型">{{ typeText }}</el-descriptions-item>
       <el-descriptions-item label="编号">第 {{ no ?? source?.id }} 条</el-descriptions-item>
+    </el-descriptions>
+
+    <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+      <el-descriptions-item label="沙箱实测">
+        <template v-if="probeDetail">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+            <el-tag :type="PROBE_TAG[probeKey(source)]" size="small">
+              {{ PROBE_TXT[probeKey(source)] }}
+            </el-tag>
+            <span class="muted">经 Node 沙箱真实取歌核验</span>
+          </div>
+          <div class="probe-res">
+            <div v-for="l in probeLines" :key="l.key" class="probe-row">
+              <span class="probe-plat">{{ l.name }}</span>
+              <el-tag :type="l.tag" size="small" effect="plain">
+                {{ l.res && l.res.status === 'usable' ? '通过' : l.res ? '失败' : '未测' }}
+              </el-tag>
+              <span class="muted probe-txt">{{ l.text }}</span>
+            </div>
+            <div v-if="probeDetail.updateAlert?.log" class="probe-row">
+              <span class="probe-plat">提醒</span>
+              <el-tag type="warning" size="small" effect="plain">更新</el-tag>
+              <span class="muted probe-txt">{{ probeDetail.updateAlert.log }}</span>
+            </div>
+            <div v-if="probeDetail.loadError" class="probe-row">
+              <span class="probe-plat">脚本</span>
+              <span class="muted probe-txt">{{ probeDetail.loadError }}</span>
+            </div>
+          </div>
+          <div v-if="probedAt" class="muted probe-at">实测时间 {{ probedAt }}</div>
+        </template>
+        <span v-else class="muted">未实测（可到后台「配置管理 → 沙箱实测」开启）</span>
+      </el-descriptions-item>
     </el-descriptions>
 
     <el-descriptions :column="1" border size="small" style="margin-top: 12px">
@@ -125,3 +216,27 @@ const variants = computed(() => props.source?.variants || [])
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.probe-res {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+}
+.probe-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.probe-plat {
+  min-width: 52px;
+}
+.probe-txt {
+  flex: 1;
+  word-break: break-all;
+}
+.probe-at {
+  margin-top: 6px;
+  font-size: 12px;
+}
+</style>

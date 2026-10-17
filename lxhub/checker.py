@@ -10,7 +10,6 @@ import json
 from .discover import now
 from .fetcher import fetch_limited, new_client, probe_hosts
 
-
 async def run_check(cfg, db, log=print, progress=None):
     from .progress import NoOpProgress
     p = progress or NoOpProgress()
@@ -66,10 +65,17 @@ async def run_check(cfg, db, log=print, progress=None):
 
     try:
         await asyncio.gather(*(one(r) for r in rows))
-        # 后端连续多轮全挂的音源视同废弃，直接清出列表
+        # 后端连续多轮全挂的音源视同废弃，直接清出列表；实测可用（probe usable）受保护
         removed = db.prune_dead_backends()
         if removed:
             log(f"[检测] 清理后端长期不可达记录 {removed} 条")
+        # 复检完成后自动追加沙箱实测（probe.enabled 时），内容更新/未测过的优先补测
+        if getattr(cfg, "probe", {}).get("enabled") and not p.cancelled:
+            from .probe import run_probe
+            try:
+                await run_probe(cfg, db, log=log, progress=p)
+            except Exception as e:
+                log(f"[实测] 探测异常: {e!r}")
         counters["cancelled"] = p.cancelled
         db.finish_run(run_id, now(), json.dumps(
             {"checked": counters["done"], "alive": counters["alive"],

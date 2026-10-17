@@ -6,6 +6,7 @@ export interface StatsView {
   total: string
   alive: string
   valid: string
+  usable: string
   lastCrawl: string
   lastCrawlFull: string
 }
@@ -19,6 +20,7 @@ export function useStats() {
     total: '—',
     alive: '—',
     valid: '—',
+    usable: '—',
     lastCrawl: '—',
     lastCrawlFull: '',
   })
@@ -29,6 +31,7 @@ export function useStats() {
       stats.total = String(s.stats.total)
       stats.alive = String(s.stats.alive)
       stats.valid = String(s.stats.valid)
+      stats.usable = s.stats.probe_usable == null ? '—' : String(s.stats.probe_usable)
       const lc = s.last_crawl
       const when = lc ? lc.finished_at || lc.started_at || '' : ''
       const rel = fmtRel(when)

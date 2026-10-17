@@ -38,7 +38,9 @@ export function useProgress(onDone: () => void) {
         : '已完成'
       : p.kind === 'crawl'
         ? '正在爬取'
-        : '正在检测'
+        : p.kind === 'probe'
+          ? '正在沙箱实测'
+          : '正在检测'
     view.msg = p.message || ''
     view.elapsed = `已用时 ${fmtElapsed(p.elapsed || 0)}`
     const total = s.urls_total || 0
@@ -51,6 +53,10 @@ export function useProgress(onDone: () => void) {
     if (p.kind === 'crawl') {
       if (s.valid != null) bits.push(`疑似音源 ${s.valid}`)
       if (s.new != null) bits.push(`新增 ${s.new}`)
+    } else if (p.kind === 'probe') {
+      if (s.usable != null) bits.push(`实测可用 ${s.usable}`)
+      if (s.degraded) bits.push(`降级 ${s.degraded}`)
+      if (s.not_loadable) bits.push(`失败 ${s.not_loadable}`)
     } else if (s.alive != null) {
       bits.push(`存活 ${s.alive}`)
     }
@@ -83,7 +89,9 @@ export function useProgress(onDone: () => void) {
           ? '任务已取消'
           : p.kind === 'crawl'
             ? `爬取完成：检测 ${s.checked ?? '—'} 条，疑似音源 ${s.valid ?? '—'} 条`
-            : `检测完成：存活 ${s.alive ?? '—'} / 失效 ${s.dead ?? '—'}`,
+            : p.kind === 'probe'
+              ? `实测完成：可用 ${s.usable ?? '—'} / 降级 ${s.degraded ?? '—'} / 失败 ${s.not_loadable ?? '—'}`
+              : `检测完成：存活 ${s.alive ?? '—'} / 失效 ${s.dead ?? '—'}`,
         { type: 'success' },
       )
       window.setTimeout(() => {

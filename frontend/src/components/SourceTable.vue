@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { downloadUrl } from '@/api/sources'
-import { baseName, PLAT, STATUS_TXT, TAG_TYPE, statusKey } from '@/utils/source'
+import {
+  baseName,
+  PLAT,
+  PROBE_TAG,
+  PROBE_TXT,
+  probeKey,
+  probeTip,
+  STATUS_TXT,
+  TAG_TYPE,
+  statusKey,
+} from '@/utils/source'
 import { fmtFull, fmtRel } from '@/utils/format'
 import { withPrefix } from '@/utils/prefix'
 import { copyText } from '@/utils/clipboard'
@@ -51,6 +61,16 @@ function tipBits(s: Source): string {
           <el-tag :type="TAG_TYPE[statusKey(row)]" size="small">
             {{ STATUS_TXT[statusKey(row)] }}
           </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="probe" label="实测" width="92" sortable="custom" align="center">
+        <template #default="{ row }">
+          <!-- 不用 raw-content：实测明细文本来自外网音源脚本（作者可控），按纯文本渲染防 XSS -->
+          <el-tooltip placement="top" :content="probeTip(row)" popper-class="probe-tip-popper">
+            <el-tag :type="PROBE_TAG[probeKey(row)]" size="small" effect="plain">
+              {{ PROBE_TXT[probeKey(row)] }}
+            </el-tag>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="name" label="名称" sortable="custom" min-width="240" show-overflow-tooltip>

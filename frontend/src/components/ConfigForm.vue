@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { getAdminConfig, setAdminConfig } from '@/api/auth'
 import { message } from '@/utils/message'
 import type { AdminConfigResp, AdminField } from '@/types'
@@ -51,6 +52,51 @@ const GROUPS: Record<string, ConfigGroup> = {
     fields: [
       { key: 'crawl_interval_hours', label: '全量爬取间隔（小时）', type: 'float' },
       { key: 'check_interval_hours', label: '可用性复检间隔（小时）', type: 'float' },
+    ],
+  },
+  probe: {
+    title: '沙箱实测（probe）',
+    fields: [
+      {
+        key: 'probe.enabled',
+        label: '启用沙箱实测',
+        type: 'bool',
+        tip: '控制「定时实测」与「复检后自动补测」；手动点「沙箱实测」按钮不受此开关限制',
+      },
+      {
+        key: 'probe.interval_hours',
+        label: '定时间隔（小时，0 = 不定时）',
+        type: 'float',
+        tip: '开启后每 N 小时自动实测一轮未测/内容有变化/缓存过期的音源',
+      },
+      {
+        key: 'probe.deep',
+        label: '附带 L2 音质核验（flac / flac24bit）',
+        type: 'bool',
+        tip: '对实测通过的平台按声明音质重新取链核对容器参数，耗时与流量倍增',
+      },
+      {
+        key: 'probe.qualities',
+        label: '核验音质清单（每行一个：128k / flac / flac24bit）',
+        type: 'lines',
+        tip: '仅 deep 模式用到',
+      },
+      { key: 'probe.max_per_run', label: '每轮最多实测条数', type: 'number' },
+      {
+        key: 'probe.refresh_hours',
+        label: '结果缓存有效期（小时）',
+        type: 'float',
+        tip: '超过后视为待重测；脚本内容变化时始终立即重测',
+      },
+      { key: 'probe.concurrency', label: '并行 worker 数', type: 'number' },
+      { key: 'probe.timeout', label: '单条脚本总预算（秒）', type: 'number' },
+      { key: 'probe.node', label: 'Node 可执行文件（默认 node；需 ≥20）', type: 'text' },
+      {
+        key: 'probe.allow_private',
+        label: '允许探测私网/本机后端域名',
+        type: 'bool',
+        tip: '默认禁止（防 SSRF）；仅当音源自建后端在本网段时才需要开启',
+      },
     ],
   },
 }
@@ -167,7 +213,15 @@ onMounted(() => void load())
   <el-card v-loading="loading" shadow="never">
     <template #header>{{ group.title }}</template>
     <el-form label-position="top">
-      <el-form-item v-for="f in group.fields" :key="f.key" :label="f.label">
+      <el-form-item v-for="f in group.fields" :key="f.key">
+        <template #label>
+          <span>
+            {{ f.label }}
+            <el-tooltip v-if="f.tip" :content="f.tip" placement="top">
+              <el-icon class="field-tip"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <el-switch v-if="f.type === 'bool'" v-model="boolModel[f.key]" />
         <el-input-number
           v-else-if="f.type === 'number'"
@@ -208,3 +262,12 @@ onMounted(() => void load())
     </div>
   </el-card>
 </template>
+
+<style scoped>
+.field-tip {
+  margin-left: 4px;
+  vertical-align: -2px;
+  color: var(--el-text-color-placeholder);
+  cursor: help;
+}
+</style>

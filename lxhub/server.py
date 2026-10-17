@@ -47,7 +47,9 @@ SESSIONS: dict = {}
 SESSION_TTL = 8 * 3600
 OVERRIDE_PATH = Path(cfg.db_path).resolve().parent / "config.override.json"
 
-# 网页后台可编辑的字段（github_token 亦可在此填写，但会明文落盘到数据卷）
+# 网页后台可编辑的字段（github_token 亦可在此填写，但会明文落盘到数据卷）。
+# probe.* 是平铺键，读写时由 _get_value / _set_value 映射到 cfg.probe 子项，
+# 落盘时 _save_overrides 会合并成 override 文件里的 "probe": {...} 嵌套块。
 EDITABLE = {
     "github_token": str,
     "keywords": list,
@@ -62,6 +64,16 @@ EDITABLE = {
     "check_interval_hours": float,
     "crawl_interval_hours": float,
     "mirror_prefixes": list,
+    "probe.enabled": bool,
+    "probe.interval_hours": float,
+    "probe.deep": bool,
+    "probe.qualities": list,
+    "probe.max_per_run": int,
+    "probe.refresh_hours": float,
+    "probe.concurrency": int,
+    "probe.timeout": int,
+    "probe.node": str,
+    "probe.allow_private": bool,
 }
 
 # 后台表单只填一个 URL，不填生效域名时的默认值：
@@ -100,11 +112,40 @@ def _norm_mirror(v):
     return {"name": name, "prefix": p, "hosts": list(hosts)}
 
 
+def _cast_bool(v):
+    """宽容解析布尔值：后台开关传 true/false，curl 等传字符串 'true'/'false' 也认。"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on", "y", "是")
+    raise ValueError("需要布尔值")
+
+
+def _get_value(key: str):
+    """EDITABLE 平铺键 → 实际配置：probe.* 读 cfg.probe 子项，其余读 cfg 属性。"""
+    if key.startswith("probe."):
+        return (cfg.probe or {}).get(key[6:])
+    return getattr(cfg, key)
+
+
+def _set_value(key: str, value):
+    if key.startswith("probe."):
+        probe = dict(cfg.probe or {})
+        probe[key[6:]] = value
+        cfg.probe = probe
+    else:
+        setattr(cfg, key, value)
+
+
 def _save_overrides(data: dict):
     """把变更**合并**进既有 override 文件。
 
     必须合并而非覆盖：后台可能只提交部分字段，整体覆盖会清掉其余已保存配置
     （曾导致只改一个开关就把 github_token 等全部抹掉）。
+    probe.* 平铺键在落盘前先合并成 "probe": {...} 嵌套块，
+    与 config.json / load_config 的读取语义保持一致。
     """
     try:
         cur: dict = {}
@@ -114,7 +155,16 @@ def _save_overrides(data: dict):
                 cur = {}
         except (OSError, json.JSONDecodeError):
             cur = {}
-        cur.update(data)
+        probe_patch: dict = {}
+        for k, v in data.items():
+            if k.startswith("probe."):
+                probe_patch[k[6:]] = v
+            else:
+                cur[k] = v
+        if probe_patch:
+            merged = dict(cur.get("probe") or {})
+            merged.update(probe_patch)
+            cur["probe"] = merged
         OVERRIDE_PATH.parent.mkdir(parents=True, exist_ok=True)
         OVERRIDE_PATH.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError as e:
@@ -126,11 +176,33 @@ def _load_overrides():
     except (OSError, json.JSONDecodeError):
         return
     for k, v in data.items():
+        if k == "probe" and isinstance(v, dict):
+            v = {sk: sv for sk, sv in v.items() if f"probe.{sk}" in EDITABLE}
+            if v:
+                _set_probe(v)
+            continue
         if k in EDITABLE:
             try:
-                setattr(cfg, k, v)
-            except Exception:
+                cast = EDITABLE[k]
+                if cast is bool:
+                    v = _cast_bool(v)
+                _set_value(k, cast(v))
+            except (ValueError, TypeError):
                 pass
+
+
+def _set_probe(sub: dict):
+    """override 文件里的 "probe" 块 → cfg.probe（只认 EDITABLE 里登记过的子键）。"""
+    probe = dict(cfg.probe or {})
+    for sk, sv in sub.items():
+        try:
+            cast = EDITABLE[f"probe.{sk}"]
+            if cast is bool:
+                sv = _cast_bool(sv)
+            probe[sk] = cast(sv)
+        except (ValueError, TypeError):
+            pass
+    cfg.probe = probe
 
 def _clean_sessions():
     now = time.time()
@@ -162,7 +234,7 @@ def _safe_filename(name: str) -> str:
     return name[:80] or "source"
 
 
-STATE = {"busy": None, "task": None}  # None | "crawl" | "check"
+STATE = {"busy": None, "task": None}  # None | "crawl" | "check" | "probe"
 PROGRESS: Progress | None = None
 
 
@@ -195,6 +267,9 @@ async def _run_task(kind: str):
     try:
         if kind == "crawl":
             await discover.run_crawl(cfg, db, log=_log, progress=PROGRESS)
+        elif kind == "probe":
+            from .probe import run_probe
+            await run_probe(cfg, db, log=_log, progress=PROGRESS)
         else:
             await checker.run_check(cfg, db, log=_log, progress=PROGRESS)
     except asyncio.CancelledError:
@@ -229,6 +304,15 @@ async def _scheduler():
             check_run = db.last_run("check")
             if not check_run or _hours_since(check_run["finished_at"] or check_run["started_at"]) >= cfg.check_interval_hours:
                 await asyncio.create_task(_run_task("check"))
+                continue
+            # 沙箱实测定时任务：probe.enabled 时按 interval_hours 周期触发（0 = 不定时）
+            if (cfg.probe or {}).get("enabled"):
+                interval = float(cfg.probe.get("interval_hours") or 0)
+                if interval > 0:
+                    probe_run = db.last_run("probe")
+                    if not probe_run or _hours_since(
+                            probe_run["finished_at"] or probe_run["started_at"]) >= interval:
+                        await asyncio.create_task(_run_task("probe"))
         except Exception as e:
             print(f"[定时器] {e!r}")
 
@@ -283,7 +367,7 @@ async def api_status():
         "stats": db.stats(),
         "last_crawl": db.last_run("crawl"),
         "last_check": db.last_run("check"),
-
+        "last_probe": db.last_run("probe"),
     }
 
 
@@ -325,6 +409,20 @@ async def api_check(req: Request):
     if STATE["busy"]:
         raise HTTPException(409, f"任务进行中: {STATE['busy']}")
     asyncio.create_task(_run_task("check"))
+    return {"started": True}
+
+
+@app.post("/api/probe")
+async def api_probe(req: Request):
+    """手动触发一轮沙箱实测。
+
+    不要求 probe.enabled：开关只控制「定时任务 + 检测后自动补测」，
+    后台手动点按钮即视为明确意图。未配置 Node 时按 not-loadable 落库，不影响服务。
+    """
+    _check_admin(req)
+    if STATE["busy"]:
+        raise HTTPException(409, f"任务进行中: {STATE['busy']}")
+    asyncio.create_task(_run_task("probe"))
     return {"started": True}
 
 
@@ -420,7 +518,12 @@ async def admin_logout(req: Request):
 @app.get("/api/admin/config")
 async def admin_get(req: Request):
     _check_admin(req)
-    data = {k: getattr(cfg, k) for k in EDITABLE}
+    data = {}
+    for k in EDITABLE:
+        try:
+            data[k] = _get_value(k)
+        except Exception:
+            data[k] = None
     # 不回传真实 token：否则打开后台点一下保存，环境变量里的 token 就会被明文写进数据卷
     data["github_token"] = ""
     return {
@@ -445,7 +548,9 @@ async def admin_set(req: Request):
             continue
         v = partial[k]
         try:
-            if cast is list:
+            if cast is bool:
+                applied[k] = _cast_bool(v)
+            elif cast is list:
                 if not isinstance(v, list):
                     raise ValueError("必须是数组")
                 applied[k] = v
@@ -458,8 +563,21 @@ async def admin_set(req: Request):
             applied["mirror_prefixes"] = [_norm_mirror(x) for x in applied["mirror_prefixes"]]
         except ValueError as e:
             raise HTTPException(400, f"字段 mirror_prefixes 无效: {e}")
+    if "probe.qualities" in applied:
+        qs = [str(x).strip() for x in applied["probe.qualities"] if str(x).strip()]
+        bad = [q for q in qs if q not in ("128k", "flac", "flac24bit")]
+        if bad:
+            raise HTTPException(400, f"probe.qualities 含不支持的音质: {bad}（可选 128k/flac/flac24bit）")
+        applied["probe.qualities"] = qs
+    if "probe.node" in applied and not str(applied["probe.node"]).strip():
+        applied["probe.node"] = "node"  # 空输入回落默认，避免启动 worker 时找不到可执行文件
+    _probe_mins = {"probe.concurrency": 1, "probe.max_per_run": 0, "probe.timeout": 10,
+                   "probe.interval_hours": 0, "probe.refresh_hours": 0}
+    for k, lo in _probe_mins.items():
+        if k in applied and applied[k] < lo:
+            raise HTTPException(400, f"字段 {k} 不能小于 {lo}")
     for k, v in applied.items():
-        setattr(cfg, k, v)
+        _set_value(k, v)
     _save_overrides(applied)
     return {"ok": True, "applied": list(applied.keys())}
 
@@ -472,3 +590,16 @@ def _ascii_fallback(name: str) -> str:
 
 if (WEBUI_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=WEBUI_DIST / "assets"), name="webui_assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    """SPA history 路由兜底：/admin/overview 等任意深链刷新时返回页面本身。
+
+    必须注册在所有 API 路由与 /assets 挂载之后（Starlette 按注册顺序匹配），
+    否则会先于真实路由被命中，吞掉 API 的 404 与静态资源。
+    API 与静态资源仍保持原生 404 / 直出，只有页面路径回退 index.html。
+    """
+    if full_path.startswith(("api/", "assets/")):
+        raise HTTPException(404, "Not Found")
+    return _webui_index()

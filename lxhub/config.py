@@ -28,6 +28,19 @@ DEFAULTS = {
     # 复制链接时可拼接的加速前缀：[{"name":"","prefix":"https://gh1.lhl.one/","hosts":[...]}]
     "mirror_prefixes": [],
 
+    # 沙箱实测探测（可选实验特性）。enabled=False 时保持纯静态模式
+    "probe": {
+        "enabled": False,           # 默认关闭：开启后会执行收录的音源脚本并测试取歌
+        "node": "node",             # node 可执行文件路径（>=20）
+        "interval_hours": 24,       # 定时实测周期；0 = 不定时（仅手动触发/检测后补测）
+        "concurrency": 2,           # 同时实测几个脚本
+        "max_per_run": 20,          # 单轮探测上限（复检后自动触发时也生效）
+        "refresh_hours": 72,        # 探测结果有效期；内容变更立即重测
+        "deep": False,              # 联动检测是否附带音质核验（flac/flac24bit）
+        "qualities": ["flac", "flac24bit"],
+        "timeout": 60,              # 单脚本总预算（秒）
+        "allow_private": False,     # 允许访问内网地址（默认禁止，防 SSRF）
+    },
 }
 
 
@@ -49,6 +62,7 @@ class Config:
     check_interval_hours: float
     crawl_interval_hours: float
     mirror_prefixes: list
+    probe: dict
 
 
 
@@ -109,5 +123,45 @@ def load_config(path: str | None = None) -> Config:
         if env.get(env_key):
             data[cfg_key] = env[env_key]
     data["port"] = int(data["port"])
+    data["probe"] = _norm_probe(data.get("probe"))
     fields = Config.__dataclass_fields__
     return Config(**{k: v for k, v in data.items() if k in fields})
+
+
+def _norm_probe(raw) -> dict:
+    """归一化 probe 配置：类型校验 + 与默认值合并，非法整体回落默认。"""
+    out = dict(DEFAULTS["probe"])
+    if isinstance(raw, dict):
+        for k in list(out):
+            if k not in raw:
+                continue
+            v = raw[k]
+            if isinstance(out[k], bool):
+                out[k] = bool(v)
+            elif isinstance(out[k], int):
+                try:
+                    out[k] = int(v)
+                except (TypeError, ValueError):
+                    out[k] = DEFAULTS["probe"][k]
+            elif isinstance(out[k], float):
+                try:
+                    out[k] = float(v)
+                except (TypeError, ValueError):
+                    out[k] = DEFAULTS["probe"][k]
+            elif k == "qualities":
+                if isinstance(v, str):
+                    v = [s.strip() for s in v.split(",")]
+                out[k] = [str(s) for s in (v or DEFAULTS["probe"]["qualities"])
+                          if str(s).strip()]
+            else:
+                out[k] = str(v)
+    for k, default in DEFAULTS["probe"].items():
+        if out.get(k) in ("", None) and not isinstance(out.get(k), bool):
+            out[k] = default
+    # 强制下限：防手滑配置（如 concurrency=0）让调度器/信号量卡死
+    out["concurrency"] = max(1, int(out["concurrency"]))
+    out["max_per_run"] = max(0, int(out["max_per_run"]))
+    out["timeout"] = max(10, int(out["timeout"]))
+    out["interval_hours"] = max(0.0, float(out["interval_hours"]))
+    out["refresh_hours"] = max(0.0, float(out["refresh_hours"]))
+    return out
