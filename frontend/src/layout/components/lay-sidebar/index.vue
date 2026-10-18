@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { emitter } from '@/utils/mitt'
 import { useNav } from '@/layout/hooks/useNav'
 import { useLayout } from '@/layout/hooks/useLayout'
 import { usePermissionStoreHook } from '@/store/modules/permission'
@@ -14,36 +13,27 @@ defineOptions({ name: 'LaySidebar' })
 
 const route = useRoute()
 const { isCollapse, device, tooltipEffect, pureApp, toggleSideBar } = useNav()
+// 直接读响应式配置：切开关时 store 一变即重新渲染。
+// 曾经用「快照 ref + emitter logoChange」接收，但 setConfigure 从不发事件，
+// 导致开关只改 store、侧边栏要等整页刷新才生效
 const { showLogo } = useLayout()
-const showLogoState = ref(showLogo.value)
 /** 鼠标是否悬浮在侧边栏上（用于显示居中折叠按钮） */
 const isShow = ref(false)
 
 const menuData = computed(() => usePermissionStoreHook().wholeMenus)
 const loading = computed(() => menuData.value.length === 0)
 const defaultActive = computed(() => (route.meta?.activePath as string) || route.path)
-
-onMounted(() => {
-  emitter.on('logoChange', (key) => {
-    showLogoState.value = key
-  })
-})
-
-onBeforeUnmount(() => {
-  // 解绑公共事件，防止多次触发
-  emitter.off('logoChange')
-})
 </script>
 
 <template>
   <div
     v-loading="loading"
     class="sidebar-container"
-    :class="{ 'has-logo': showLogoState }"
+    :class="{ 'has-logo': showLogo }"
     @mouseenter.prevent="isShow = true"
     @mouseleave.prevent="isShow = false"
   >
-    <SidebarLogo v-if="showLogoState" :collapse="isCollapse" />
+    <SidebarLogo v-if="showLogo" :collapse="isCollapse" />
     <el-scrollbar wrap-class="scrollbar-wrapper" :class="[device === 'mobile' ? 'mobile' : 'pc']">
       <el-menu
         router

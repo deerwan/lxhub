@@ -24,6 +24,21 @@ export interface RunInfo {
   finished_at?: string
 }
 
+/** worker 解析出的音频真实规格（容器/码率/采样率/位深等） */
+export interface ProbeSpec {
+  container?: string
+  bitrate?: number
+  sampleRate?: number
+  bitDepth?: number
+  channels?: number
+  totalSamples?: number
+  avgBitrateKbps?: number
+  seconds?: number
+  bytes?: number
+  mpeg?: number
+  specUnverified?: string
+}
+
 /** 单个平台实测结果（Node 沙箱 worker 产出） */
 export interface ProbeRes {
   status: 'usable' | 'failed' | 'skipped'
@@ -31,7 +46,7 @@ export interface ProbeRes {
   bitrate?: number
   duration?: number
   format?: string
-  spec?: string
+  spec?: ProbeSpec | null
   quality?: 'matched' | 'degraded' | 'mismatch' | 'refused' | 'unknown'
   reason?: string
   message?: string

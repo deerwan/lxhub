@@ -204,8 +204,13 @@ def _parse_link_next(link_header: str) -> str | None:
     return None
 
 
-async def _search_page(client, cfg, kw: str, sort: str, page: int, log) -> dict | None:
-    """搜索一页，返回 (items, total) 或 rate-limited 信号。"""
+async def _search_page(client, cfg, kw: str, sort: str, page: int, log,
+                      retries: int = 3) -> dict | None:
+    """搜索一页，返回 (items, total) 或 rate-limited 信号。
+
+    retries 限制 403/429 后的等待重试次数：无限递归会在持续限流时
+    不断自我调用，最终爆栈；重试耗尽按无结果处理，交给后续兜底链路。
+    """
     params = {
         "q": kw,
         "sort": sort,
@@ -218,10 +223,13 @@ async def _search_page(client, cfg, kw: str, sort: str, page: int, log) -> dict 
         params=params,
         headers=_gh_headers(cfg))
     if r.status_code == 403 or r.status_code == 429:
+        if retries <= 0:
+            log(f"[搜索] {kw!r} {sort} 连续限流，放弃页 {page}")
+            return None
         wait = int(r.headers.get("Retry-After", 60))
-        log(f"[搜索] {kw!r} {sort} 触发限流，等待 {wait}s 后重试页 {page}")
+        log(f"[搜索] {kw!r} {sort} 触发限流，等待 {wait}s 后重试页 {page}（剩余 {retries} 次）")
         await asyncio.sleep(wait)
-        return await _search_page(client, cfg, kw, sort, page, log)
+        return await _search_page(client, cfg, kw, sort, page, log, retries - 1)
     if r.status_code != 200:
         return None
     data = r.json()
@@ -305,13 +313,17 @@ async def discover_repos(client, cfg, log, progress=None) -> dict:
             return await _kw_sort(kw, sort)
 
     tasks: list = []
-    for sort in sort_orders:
-        tasks.append(asyncio.create_task(_limited(top_kws[0], sort)))
-    await asyncio.sleep(0.5)
-    for sort in sort_orders:
-        tasks.append(asyncio.create_task(_limited(top_kws[1], sort)))
-    for kw in top_kws[2:]:
-        tasks.append(asyncio.create_task(_limited(kw, "updated")))
+    # keywords 为空（后台可清空）或只有 1 个时，top_kws[0]/[1] 会越界整轮崩溃，
+    # 这里按实际个数守卫；无关键词时只靠种子仓库兜底
+    if top_kws:
+        for sort in sort_orders:
+            tasks.append(asyncio.create_task(_limited(top_kws[0], sort)))
+        await asyncio.sleep(0.5)
+        if len(top_kws) > 1:
+            for sort in sort_orders:
+                tasks.append(asyncio.create_task(_limited(top_kws[1], sort)))
+        for kw in top_kws[2:]:
+            tasks.append(asyncio.create_task(_limited(kw, "updated")))
     for kw in cfg.keywords[len(top_kws):]:
         tasks.append(asyncio.create_task(_limited(kw, "updated")))
 

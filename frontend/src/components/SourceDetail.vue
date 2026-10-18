@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   baseName,
+  fmtSpec,
   parseHosts,
   PLAT,
   PROBE_TAG,
@@ -80,7 +81,7 @@ interface ProbeLine {
 function lineText(r: ProbeRes): string {
   if (r.status === 'usable') {
     const bits = [r.message || '返回真实音频']
-    if (r.spec) bits.push(r.spec)
+    if (r.spec) bits.push(fmtSpec(r.spec))
     if (r.quality && r.quality !== 'unknown') {
       bits.push(
         '音质' +

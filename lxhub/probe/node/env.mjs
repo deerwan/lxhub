@@ -6,7 +6,10 @@ import nodeCrypto from 'node:crypto'
 const DEFAULT_REQ_CAP_MS = 15000
 
 const PRIVATE_V4_RE = /^(127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|172\.(1[6-9]|2\d|3[01])\.)/
-const PRIVATE_HOST_RE = /^(localhost|.*\.localhost|metadata\.google?internal)$/i
+// 本地/私网主机名：localhost、任意 .internal（含云元数据 metadata.google.internal）。
+// 注意 .internal 整段拦掉：原正则写成 metadata\.google?internal（? 只让 e 可选），
+// 匹配不了真实的 metadata.google.internal，第一道主机名闸门形同虚设
+const PRIVATE_HOST_RE = /^(localhost|.*\.localhost|.*\.internal)$/i
 
 export function isPrivateIp(ip) {
   if (PRIVATE_V4_RE.test(ip)) return true

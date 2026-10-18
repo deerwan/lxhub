@@ -79,6 +79,19 @@ export const PROBE_RANK: Record<ProbeKey, number> = {
   'not-loadable': 3,
 }
 
+/** 音频规格摘要：worker 产出的 spec 对象 → 人类可读（容器/码率/采样率/位深） */
+export function fmtSpec(spec: NonNullable<ProbeRes['spec']>): string {
+  const bits: string[] = []
+  if (spec.container) bits.push(String(spec.container).toUpperCase())
+  if (spec.bitrate) bits.push(`${spec.bitrate}kbps`)
+  if (spec.sampleRate) bits.push(`${Math.round(spec.sampleRate / 1000)}kHz`)
+  if (spec.bitDepth) bits.push(`${spec.bitDepth}bit`)
+  if (spec.channels) bits.push(`${spec.channels}ch`)
+  if (spec.avgBitrateKbps) bits.push(`均值 ${spec.avgBitrateKbps}kbps`)
+  if (spec.specUnverified) bits.push('规格存疑')
+  return bits.join(' / ')
+}
+
 /** 实测 tooltip 明细：逐平台一行；失败展示原因；含 L2 音质标注 */
 export function probeTip(s: Source): string {
   const d = s.probe_detail as ProbeDetail | undefined
@@ -96,7 +109,7 @@ export function probeTip(s: Source): string {
       bits.push(`${name}：未测`)
     } else if (r.status === 'usable') {
       const q = r.quality && r.quality !== 'unknown' ? ` · 音质${qLabel(r.quality)}` : ''
-      const spec = r.spec ? ` · ${r.spec}` : ''
+      const spec = r.spec ? ` · ${fmtSpec(r.spec)}` : ''
       bits.push(`${name}：✓ ${r.message || '真实音频'}${spec}${q}`)
     } else {
       bits.push(`${name}：✗ ${r.reason || r.message || '失败'}`)

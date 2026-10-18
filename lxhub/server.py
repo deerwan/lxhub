@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import checker, discover
-from .config import load_config
+from .config import EDITABLE, cast_bool, load_config, override_path
 from .db import DB
 from .progress import Progress
 
@@ -46,36 +46,9 @@ ADMIN_USER = os.environ.get("LXH_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("LXH_ADMIN_PASS", "")
 SESSIONS: dict = {}
 SESSION_TTL = 8 * 3600
-OVERRIDE_PATH = Path(cfg.db_path).resolve().parent / "config.override.json"
-
-# 网页后台可编辑的字段（github_token 亦可在此填写，但会明文落盘到数据卷）。
-# probe.* 是平铺键，读写时由 _get_value / _set_value 映射到 cfg.probe 子项，
-# 落盘时 _save_overrides 会合并成 override 文件里的 "probe": {...} 嵌套块。
-EDITABLE = {
-    "github_token": str,
-    "keywords": list,
-    "seed_repos": list,
-    "seed_urls": list,
-    "max_repos_per_keyword": int,
-    "max_repos_total": int,
-    "max_files_per_repo": int,
-    "max_file_bytes": int,
-    "request_timeout": float,
-    "concurrency": int,
-    "check_interval_hours": float,
-    "crawl_interval_hours": float,
-    "mirror_prefixes": list,
-    "probe.enabled": bool,
-    "probe.interval_hours": float,
-    "probe.deep": bool,
-    "probe.qualities": list,
-    "probe.max_per_run": int,
-    "probe.refresh_hours": float,
-    "probe.concurrency": int,
-    "probe.timeout": int,
-    "probe.node": str,
-    "probe.allow_private": bool,
-}
+# 后台保存的覆盖配置落盘处（与数据库同目录）；加载逻辑在 config.apply_overrides，
+# CLI 与 Web 启动时都会应用，保证两条轨道配置一致
+OVERRIDE_PATH = override_path(cfg.db_path)
 
 # 后台表单只填一个 URL，不填生效域名时的默认值：
 # 本项目收录的链接均来自 GitHub，加速前缀也只对这些镜像站有意义，
@@ -111,17 +84,6 @@ def _norm_mirror(v):
         name = urlparse(p).netloc or p
     hosts = DEFAULT_MIRROR_HOSTS if explicit_hosts is None else explicit_hosts
     return {"name": name, "prefix": p, "hosts": list(hosts)}
-
-
-def _cast_bool(v):
-    """宽容解析布尔值：后台开关传 true/false，curl 等传字符串 'true'/'false' 也认。"""
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, (int, float)):
-        return bool(v)
-    if isinstance(v, str):
-        return v.strip().lower() in ("1", "true", "yes", "on", "y", "是")
-    raise ValueError("需要布尔值")
 
 
 def _get_value(key: str):
@@ -171,40 +133,6 @@ def _save_overrides(data: dict):
     except OSError as e:
         print(f"[admin] 保存配置失败: {e!r}")
 
-def _load_overrides():
-    try:
-        data = json.loads(OVERRIDE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    for k, v in data.items():
-        if k == "probe" and isinstance(v, dict):
-            v = {sk: sv for sk, sv in v.items() if f"probe.{sk}" in EDITABLE}
-            if v:
-                _set_probe(v)
-            continue
-        if k in EDITABLE:
-            try:
-                cast = EDITABLE[k]
-                if cast is bool:
-                    v = _cast_bool(v)
-                _set_value(k, cast(v))
-            except (ValueError, TypeError):
-                pass
-
-
-def _set_probe(sub: dict):
-    """override 文件里的 "probe" 块 → cfg.probe（只认 EDITABLE 里登记过的子键）。"""
-    probe = dict(cfg.probe or {})
-    for sk, sv in sub.items():
-        try:
-            cast = EDITABLE[f"probe.{sk}"]
-            if cast is bool:
-                sv = _cast_bool(sv)
-            probe[sk] = cast(sv)
-        except (ValueError, TypeError):
-            pass
-    cfg.probe = probe
-
 def _clean_sessions():
     now = time.time()
     expired = [t for t, e in SESSIONS.items() if e < now]
@@ -222,7 +150,6 @@ def _check_admin(req: Request):
     if not token or SESSIONS.get(token, 0) < time.time():
         raise HTTPException(401, "未登录或会话已过期")
 
-_load_overrides()
 
 def _base_name(url: str) -> str:
     name = (url or "").rstrip("/").split("/")[-1]
@@ -565,7 +492,7 @@ async def admin_set(req: Request):
         v = partial[k]
         try:
             if cast is bool:
-                applied[k] = _cast_bool(v)
+                applied[k] = cast_bool(v)
             elif cast is list:
                 if not isinstance(v, list):
                     raise ValueError("必须是数组")
@@ -609,13 +536,25 @@ if (WEBUI_DIST / "assets").is_dir():
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
-async def spa_fallback(full_path: str):
+async def spa_fallback(full_path: str, request: Request):
     """SPA history 路由兜底：/admin/overview 等任意深链刷新时返回页面本身。
 
     必须注册在所有 API 路由与 /assets 挂载之后（Starlette 按注册顺序匹配），
     否则会先于真实路由被命中，吞掉 API 的 404 与静态资源。
-    API 与静态资源仍保持原生 404 / 直出，只有页面路径回退 index.html。
+
+    处理顺序：
+    1. dist 根目录的静态文件（icon.svg、platform-config.json 等——它们不在
+       /assets 挂载范围内）：直接返回文件本体。此前这里只有页面兜底，这些文件
+       被当成 index.html 返回（HTML 200），浏览器既拿不到图标也拿不到配置；
+    2. 其余路径仅对接受 HTML 的请求（浏览器页面导航）回退 index.html，
+       缺失的静态文件保持 404，避免把网页当图标缓存、掩盖资源缺失。
     """
     if full_path.startswith(("api/", "assets/")):
+        raise HTTPException(404, "Not Found")
+    root = WEBUI_DIST.resolve()
+    candidate = (root / full_path).resolve()
+    if candidate.is_file() and str(candidate).startswith(str(root)):
+        return FileResponse(candidate)
+    if "text/html" not in request.headers.get("accept", ""):
         raise HTTPException(404, "Not Found")
     return _webui_index()

@@ -9,7 +9,7 @@
 | `GET /api/status` | 统计 + 最近任务 |
 | `GET /api/progress` | 当前任务进度（阶段、计数、实时日志，每秒轮询） |
 | `POST /api/crawl` / `POST /api/check` | 触发爬取 / 复检 |
-| `POST /api/probe` | 触发一轮沙箱实测（需开启 `probe.enabled`，未开启返回 `403`） |
+| `POST /api/probe` | 触发一轮沙箱实测（手动触发不受 `probe.enabled` 开关限制；未登录返回 `401`） |
 | `POST /api/cancel` | 取消当前任务（协作式停止） |
 | `GET /export.json` | 导出 |
 

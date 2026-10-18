@@ -6,7 +6,7 @@
 import vm from 'node:vm'
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildLxEnv, lxMeta, isPrivateIp } from './env.mjs'
+import { buildLxEnv, lxMeta, isPrivateIp, assertPublicHost } from './env.mjs'
 
 const PLATFORMS = ['wy', 'tx', 'kw', 'kg', 'mg']
 
@@ -158,11 +158,28 @@ async function verifyUrl(url, { timeoutMs = 8000 } = {}) {
   if (host === 'localhost' || host === '' || isPrivateIp(host)) {
     return { ok: false, reason: '私有/本地地址，疑似假链接' }
   }
-  const res = await fetch(url, {
-    headers: { Range: 'bytes=0-16383', 'User-Agent': UA_PROBE },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: 'follow',
-  })
+  // redirect 用 manual 手动跟随：每跳都过 assertPublicHost，
+  // 防止「公网入口 → 302 内网」绕过防护（fetch 自动跟随不会重新校验），
+  // 与 env.mjs 里脚本请求的防护口径保持一致
+  const hostCache = new Map()
+  let curUrl = url
+  let res = null
+  for (let hop = 0; hop < 4; hop++) {
+    res = await fetch(curUrl, {
+      headers: { Range: 'bytes=0-16383', 'User-Agent': UA_PROBE },
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'manual',
+    })
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get('location')
+      if (!loc) break
+      const next = new URL(loc, curUrl)
+      await assertPublicHost(next.hostname, hostCache)
+      curUrl = next.toString()
+      continue
+    }
+    break
+  }
   const ct = (res.headers.get('content-type') || '').toLowerCase()
   if (/json|text\/html|text\/plain/i.test(ct)) {
     return { ok: false, reason: `返回 ${ct.split(';')[0]}，非音频` }

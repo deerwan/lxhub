@@ -57,9 +57,8 @@ export const usePermissionStore = defineStore('lxhub-permission', {
           break
       }
     },
-    /** 清空缓存页面 */
+    /** 清空缓存页面（只清 keep-alive 缓存，不动菜单树） */
     clearAllCachePage() {
-      this.wholeMenus = []
       this.cachePageList = []
     },
   },

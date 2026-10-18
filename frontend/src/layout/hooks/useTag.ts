@@ -58,6 +58,9 @@ export function useTags() {
   function closeAll(): void {
     useMultiTagsStoreHook().handleTags('equal', [...routerArrays])
     usePermissionStoreHook().clearAllCachePage()
+    // 目标恰为当前路由时 router.push 不会触发导航守卫，initMenus 的重建逻辑
+    // 不会执行；这里主动重建菜单，避免侧边栏因菜单为空而一直转圈
+    usePermissionStoreHook().handleWholeMenus([])
     router.push(routerArrays[0].path as string)
   }
 

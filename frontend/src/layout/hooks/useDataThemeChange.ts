@@ -43,16 +43,37 @@ export function useDataThemeChange() {
     }
   }
 
+  /**
+   * 主题切换期间临时禁用全部 CSS transition。
+   *
+   * 不禁用会有「两段式绘制」：直接引用 CSS 变量的表面（body / 导航栏 /
+   * 侧边栏）瞬间变色，而 Element Plus 控件自带过渡（.el-card 是
+   * transition: all 0.3s、.el-button 0.1s），会用几百毫秒从旧色慢慢
+   * 追赶新色——视觉上就是暗色骨架上一块块旧色控件"闪一下"。
+   * 在禁用过渡的窗口内完成类切换与主题色重设，所有表面同一帧落到终色。
+   */
+  function withoutTransitions(fn: () => void): void {
+    const style = document.createElement('style')
+    style.textContent = '*,*::before,*::after{transition:none!important}'
+    document.head.appendChild(style)
+    fn()
+    // 强制回流：确保"无过渡"状态已参与本次样式计算，再移除覆盖规则
+    void document.body.offsetHeight
+    style.remove()
+  }
+
   /** 浅色 / 深色整体风格切换 */
   function dataThemeChange(overall?: string) {
     const settings = useSettingStoreHook()
     if (overall) settings.changeLayout('overallStyle', overall)
-    if (settings.darkMode) {
-      body.classList.add('dark')
-    } else {
-      body.classList.remove('dark')
-    }
-    setEpThemeColor(useEpThemeStoreHook().epThemeColor)
+    withoutTransitions(() => {
+      if (settings.darkMode) {
+        body.classList.add('dark')
+      } else {
+        body.classList.remove('dark')
+      }
+      setEpThemeColor(useEpThemeStoreHook().epThemeColor)
+    })
   }
 
   /** 切换深色模式 */

@@ -19,10 +19,20 @@
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 16px;
   font-weight: 700;
   color: var(--el-color-primary);
   text-decoration: none;
+}
+
+/* 前台头部 Logo：与后台侧边栏同一文件、同一尺寸量级（24px） */
+.brand-logo {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
 }
 
 .site-actions {

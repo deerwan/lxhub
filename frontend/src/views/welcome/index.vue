@@ -22,6 +22,9 @@ const { rows, loading, q, statusFilter, typeFilter, load, onSortChange, openDeta
 const { stats, loadStats } = useStats()
 const { toggleDark } = useDataThemeChange()
 const darkMode = computed(() => useSettingStoreHook().darkMode)
+const title = computed(() => useSettingStoreHook().title || 'LX 音源')
+/** 与后台侧边栏、浏览器标签页同一 Logo 文件（public/favicon.svg） */
+const logoUrl = `${import.meta.env.BASE_URL}favicon.svg`
 
 const dlgVisible = ref(false)
 const current = ref<Source | null>(null)
@@ -62,7 +65,10 @@ onMounted(() => {
 <template>
   <div class="site">
     <header class="site-top">
-      <router-link to="/" class="brand">LX 音源</router-link>
+      <router-link to="/" class="brand">
+        <img class="brand-logo" :src="logoUrl" alt="logo" draggable="false" />
+        <span>{{ title }}</span>
+      </router-link>
       <div class="site-actions">
         <el-tooltip :content="darkMode ? '切换亮色' : '切换暗色'" placement="bottom">
           <el-button text circle @click="toggleDark()">

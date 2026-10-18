@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS sources (
     api_alive TEXT DEFAULT '',
     api_checked TEXT DEFAULT '',
     api_down_streak INTEGER DEFAULT 0,
+    repo_pushed_at TEXT DEFAULT '',
     content_text TEXT DEFAULT '',
     first_seen TEXT DEFAULT '',
     last_checked TEXT DEFAULT '',
@@ -366,10 +367,6 @@ class DB:
 
     def all_urls(self) -> set:
         return {r["url"] for r in self._run("SELECT url FROM sources")}
-
-    def stale_sources(self, hours: float) -> list:
-        rows = self._run("SELECT id, url FROM sources ORDER BY last_checked ASC LIMIT 500")
-        return [dict(r) for r in rows]  # 过滤逻辑交给调用方按时间判断，这里全量给
 
     def update_check(self, sid: int, status: int, alive: bool, size: int,
                      sha256: str, checked_at: str):

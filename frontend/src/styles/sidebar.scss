@@ -104,7 +104,15 @@
     overflow: hidden;
   }
 
+  .sidebar-logo-img {
+    flex-shrink: 0;
+    /* 24px 是与菜单图标（18px）视觉平衡的尺寸：再大在折叠态会显得笨重 */
+    width: 24px;
+    height: 24px;
+  }
+
   .sidebar-title {
+    margin-left: 10px;
     overflow: hidden;
     font-size: 17px;
     font-weight: 700;
@@ -113,10 +121,19 @@
     text-overflow: ellipsis;
   }
 
-  .sidebar-logo-sm {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--el-color-primary);
-    white-space: nowrap;
+  /* 折叠态（54px 宽）：只留图标并居中。
+     注意要居中的是链接内部——.sidebar-logo-link 是 width: 100%，
+     在容器上做 justify-content 居中它没有任何效果 */
+  &.collapse {
+    padding-left: 0;
+
+    .sidebar-logo-link {
+      justify-content: center;
+    }
+
+    .sidebar-logo-img {
+      width: 22px;
+      height: 22px;
+    }
   }
 }

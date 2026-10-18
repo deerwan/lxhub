@@ -73,6 +73,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* 必须覆盖 element-plus 的 width/height: 1em：全局 box-sizing 是 border-box，
+       padding: 8px 会把 1em 的内容区压成 2px，svg 作为 flex 项被压缩成
+       2×18 的细条——顶栏图标看起来全是"小点"就是这个原因 */
+    width: auto;
+    height: auto;
     padding: 8px;
     cursor: pointer;
     border-radius: 4px;

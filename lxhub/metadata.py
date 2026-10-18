@@ -140,6 +140,11 @@ _HOST_BLOCK_SUFFIX = (
     "gitmirror.com", "ghproxy.com", "stackoverflow.com", "gnu.org",
 )
 
+# 私网/保留段（与 probe 沙箱 assertPublicHost 口径对齐）：
+# 127./8、10./8、0./8、192.168./16、172.16-31、169.254 链路本地
+_PRIVATE_V4 = re.compile(
+    r"^(127\.|10\.|0\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)")
+
 
 def extract_api_hosts(text: str, limit: int = 6) -> list:
     """提取脚本里声明的后端域名（含裸域名与 URL host），用于存活探测。"""
@@ -151,7 +156,7 @@ def extract_api_hosts(text: str, limit: int = 6) -> list:
         h = h.lower().rstrip(".")
         if (h and "." in h and len(h) <= 60
                 and not h.endswith(_HOST_BLOCK_SUFFIX)
-                and not h.startswith(("127.", "0.0.0.", "192.168.", "10."))
+                and not _PRIVATE_V4.match(h)
                 and h not in hosts):
             hosts.append(h)
 

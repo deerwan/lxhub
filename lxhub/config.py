@@ -125,7 +125,9 @@ def load_config(path: str | None = None) -> Config:
     data["port"] = int(data["port"])
     data["probe"] = _norm_probe(data.get("probe"))
     fields = Config.__dataclass_fields__
-    return Config(**{k: v for k, v in data.items() if k in fields})
+    cfg = Config(**{k: v for k, v in data.items() if k in fields})
+    apply_overrides(cfg)
+    return cfg
 
 
 def _norm_probe(raw) -> dict:
@@ -165,3 +167,92 @@ def _norm_probe(raw) -> dict:
     out["interval_hours"] = max(0.0, float(out["interval_hours"]))
     out["refresh_hours"] = max(0.0, float(out["refresh_hours"]))
     return out
+
+
+# ---------- 网页后台覆盖配置 ----------
+# 后台「配置管理」保存的字段清单（读写共用）。probe.* 是平铺键，
+# 落盘时合并成 override 文件里的 "probe": {...} 嵌套块。
+# 注意 github_token 亦可在此填写，但会明文落盘到数据卷。
+EDITABLE = {
+    "github_token": str,
+    "keywords": list,
+    "seed_repos": list,
+    "seed_urls": list,
+    "max_repos_per_keyword": int,
+    "max_repos_total": int,
+    "max_files_per_repo": int,
+    "max_file_bytes": int,
+    "request_timeout": float,
+    "concurrency": int,
+    "check_interval_hours": float,
+    "crawl_interval_hours": float,
+    "mirror_prefixes": list,
+    "probe.enabled": bool,
+    "probe.interval_hours": float,
+    "probe.deep": bool,
+    "probe.qualities": list,
+    "probe.max_per_run": int,
+    "probe.refresh_hours": float,
+    "probe.concurrency": int,
+    "probe.timeout": int,
+    "probe.node": str,
+    "probe.allow_private": bool,
+}
+
+
+def cast_bool(v):
+    """宽容解析布尔值：后台开关传 true/false，curl 等传字符串 'true'/'false' 也认。"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on", "y", "是")
+    raise ValueError("需要布尔值")
+
+
+def override_path(db_path: str) -> Path:
+    """override 文件位置：与数据库同目录（data/config.override.json）。"""
+    return Path(db_path).resolve().parent / "config.override.json"
+
+
+def apply_overrides(cfg: Config) -> None:
+    """把网页后台保存的 override 合并进 cfg（找不到/读坏时静默跳过）。
+
+    在 load_config 末尾调用，CLI 与 Web 服务因此看到同一份配置——
+    曾出现「后台开了 probe.enabled，CLI 手动跑却报未启用」的双轨分裂。
+    db_path/host/port 不在 EDITABLE 中，override 改不了它们，
+    因此用 cfg.db_path 定位 override 文件本身是稳定的。
+    """
+    path = override_path(cfg.db_path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    for k, v in data.items():
+        if k == "probe" and isinstance(v, dict):
+            probe = dict(cfg.probe or {})
+            for sk, sv in v.items():
+                key = f"probe.{sk}"
+                if key not in EDITABLE:
+                    continue
+                try:
+                    cast = EDITABLE[key]
+                    if cast is bool:
+                        sv = cast_bool(sv)
+                    probe[sk] = cast(sv)
+                except (ValueError, TypeError):
+                    pass
+            cfg.probe = probe
+            continue
+        if k not in EDITABLE:
+            continue
+        try:
+            cast = EDITABLE[k]
+            if cast is bool:
+                v = cast_bool(v)
+            setattr(cfg, k, cast(v))
+        except (ValueError, TypeError):
+            pass

@@ -5,8 +5,6 @@ import mitt from 'mitt'
 type Events = {
   /** 打开右侧系统设置面板 */
   openPanel: boolean
-  /** 是否显示 `Logo` */
-  logoChange: boolean
   /** 切换布局后重新渲染菜单 */
   changLayoutRoute: string
   /** 标签页变化 */
