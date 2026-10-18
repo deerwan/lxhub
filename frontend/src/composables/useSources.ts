@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { fetchSourceDetail, fetchSources, fetchStaticExport } from '@/api/sources'
+import { fetchSourceDetail, fetchSources } from '@/api/sources'
 import { PROBE_RANK, probeKey, statusKey } from '@/utils/source'
 import { setupPrefixes } from '@/utils/prefix'
 import type { Source } from '@/types'
@@ -35,7 +35,6 @@ const SORT_GET: Record<string, (s: Source) => string | number> = {
 export function useSources() {
   const all = ref<Source[]>([])
   const loading = ref(false)
-  const staticMode = ref(false)
   const sort = ref<SortState>(loadSort())
   const q = ref('')
   const statusFilter = ref('all')
@@ -44,14 +43,7 @@ export function useSources() {
   async function load(): Promise<void> {
     loading.value = true
     try {
-      let data
-      try {
-        data = await fetchSources()
-        staticMode.value = false
-      } catch {
-        data = await fetchStaticExport()
-        staticMode.value = true
-      }
+      const data = await fetchSources()
       all.value = data.sources || []
       setupPrefixes(data.mirror_prefixes)
     } finally {
@@ -139,24 +131,20 @@ export function useSources() {
   }
 
   async function openDetail(id: number): Promise<Source | null> {
-    let s = all.value.find((x) => x.id === id)
+    const s = all.value.find((x) => x.id === id)
     if (!s) return null
-    if (!staticMode.value) {
-      try {
-        const d = await fetchSourceDetail(id)
-        d.mirrors = s.mirrors || []
-        s = d
-      } catch {
-        return null
-      }
+    try {
+      const d = await fetchSourceDetail(id)
+      d.mirrors = s.mirrors || []
+      return d
+    } catch {
+      return null
     }
-    return s
   }
 
   return {
     all,
     loading,
-    staticMode,
     sort,
     q,
     statusFilter,

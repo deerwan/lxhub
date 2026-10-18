@@ -1,6 +1,4 @@
 // lx 自定义音源沙箱环境：装配 globalThis.lx 与宿主桥接
-// 参考实现：lxserver src/server/userApi.ts（沙箱白名单/请求协议）、
-// lx-env-simulator（utils 实现）、lx-hunter（事件分发）
 import dns from 'node:dns'
 import zlib from 'node:zlib'
 import nodeCrypto from 'node:crypto'
@@ -169,7 +167,7 @@ export function buildLxEnv(scriptText, meta, opts = {}) {
           headers: Object.fromEntries(res.headers.entries()),
           body: parsed,
         }
-        // 更新提醒嗅探（参考 lxserver userApi.ts：拦截响应体里的 updateMsg/updateUrl）
+        // 更新提醒嗅探：拦截响应体里的 updateMsg/updateUrl
         const sniffSrc = (parsed && typeof parsed === 'object') ? (parsed.data || parsed) : null
         if (sniffSrc && typeof sniffSrc === 'object') {
           const um = sniffSrc.updateMsg ?? sniffSrc.log ?? sniffSrc.updateLog ?? sniffSrc.msg

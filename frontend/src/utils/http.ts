@@ -75,8 +75,8 @@ async function handleUnauthorized(): Promise<void> {
 const defaultConfig: HttpRequestConfig = { timeout: 20000 }
 
 /**
- * 极简 `http` 封装：对齐 `vue-pure-admin` 的 `PureHttp` 用法
- * （`request/get/post` + 请求/响应回调），底层使用原生 `fetch`，不额外引入 `axios`。
+ * 极简 `http` 封装：`request/get/post` + 请求/响应回调，
+ * 底层使用原生 `fetch`，不额外引入 `axios`。
  */
 class PureHttp {
   private static initConfig: HttpRequestConfig = {}

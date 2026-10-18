@@ -10,7 +10,7 @@ import { buildLxEnv, lxMeta, isPrivateIp } from './env.mjs'
 
 const PLATFORMS = ['wy', 'tx', 'kw', 'kg', 'mg']
 
-// 各平台真实测试歌（主 + 稳定备选）：字段规格参考 lxserver callRequest musicInfo 结构
+// 各平台固定测试歌曲：字段规格对齐宿主取歌参数结构
 // duration 为常数参考时长（秒），用于无 Content-Range 时估算平均码率
 const TEST_SONGS = {
   wy: [

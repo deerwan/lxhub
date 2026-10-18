@@ -1,4 +1,4 @@
-/* 折叠宽度与 `vue-pure-admin` 对齐：展开 210px、折叠 54px */
+/* 折叠宽度：展开 210px、折叠 54px */
 .sidebar-container {
   position: fixed;
   top: 0;
@@ -86,7 +86,7 @@
   transform: translate(12px, -50%);
 }
 
-/* 与 pure-admin 一致：Logo 左对齐贴边（padding-left: 10px），而不是整体居中 */
+/* Logo 左对齐贴边（padding-left: 10px），而不是整体居中 */
 .sidebar-logo-container {
   display: flex;
   flex-shrink: 0;

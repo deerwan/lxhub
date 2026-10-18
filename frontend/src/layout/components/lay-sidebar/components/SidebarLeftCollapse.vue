@@ -2,7 +2,7 @@
 import { Fold } from '@element-plus/icons-vue'
 import { useNav } from '@/layout/hooks/useNav'
 
-/** 侧边栏底部的折叠按钮（对应 `vue-pure-admin` 的 `SidebarLeftCollapse`） */
+/** 侧边栏底部的折叠按钮 */
 defineProps<{ isActive?: boolean }>()
 
 const { tooltipEffect } = useNav()

@@ -2,7 +2,7 @@
 import { DArrowLeft } from '@element-plus/icons-vue'
 import { useNav } from '@/layout/hooks/useNav'
 
-/** 鼠标悬浮侧边栏时出现的居中折叠按钮（对应 `vue-pure-admin` 的 `SidebarCenterCollapse`） */
+/** 鼠标悬浮侧边栏时出现的居中折叠按钮 */
 defineProps<{ isActive?: boolean }>()
 
 const { tooltipEffect } = useNav()

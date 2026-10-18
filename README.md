@@ -36,8 +36,8 @@ Node 沙箱（node `vm` + 全局 `lx` 环境模拟）真实运行一次，看其
 | [配置说明](docs/configuration.md) | `config.json` 全部字段与环境变量 |
 | [脚本类型](docs/script-types.md) | 音源 / 配套脚本 / 存疑 的判定依据 |
 | [加速前缀](docs/mirror-prefix.md) | 复制链接时自动拼接镜像前缀 |
-| [部署方式](docs/deployment.md) | Docker Compose / GitHub Pages 静态托管 |
+| [部署方式](docs/deploy.md) | Docker Compose / Railway 自部署 |
 | [工作原理](docs/how-it-works.md) | 发现 → 收录 → 判定 的完整流程 |
 | [沙箱实测](docs/probe.md) | 可选的"真实取歌核验"（probe）：原理、配置、风险边界 |
 | [API](docs/api.md) | 接口列表 |
-| [常见问题](docs/faq.md) | 收录少、链接失效、静态模式等问题 |
+| [常见问题](docs/faq.md) | 收录少、链接失效等问题 |

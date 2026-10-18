@@ -48,8 +48,8 @@ const getConfig = (key?: string): any => {
 /**
  * 获取项目动态全局配置。
  *
- * 与 `vue-pure-admin` 保持一致：配置放在 `public/platform-config.json`，
- * 打包后仍可修改，无需重新构建。拉取失败时回退到内置默认值而不是阻断启动。
+ * 配置放在 `public/platform-config.json`，打包后仍可修改，无需重新构建。
+ * 拉取失败时回退到内置默认值而不是阻断启动。
  */
 export const getPlatformConfig = async (app: App): Promise<PlatformConfigs> => {
   app.config.globalProperties.$config = getConfig()

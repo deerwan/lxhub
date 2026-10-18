@@ -19,8 +19,6 @@ data/
 *.db-shm
 
 # ---------- 本地导出 ----------
-# 注意：仓库根目录的 export.json 由 CI 定时生成并提交，
-# 用于 GitHub Pages 静态站，不要在这里忽略它（否则 workflow 的 git add 会失败）。
 # 手动导出请写到其他路径，例如：python main.py export --out /tmp/export.json
 site/
 

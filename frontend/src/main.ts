@@ -12,8 +12,7 @@ import './styles/index.scss'
 const app = createApp(App)
 
 /**
- * 与 `vue-pure-admin` 保持一致的启动顺序：
- * 先拉取 `public/platform-config.json`，再依次挂载 pinia、router、element-plus。
+ * 启动顺序：先拉取 `public/platform-config.json`，再依次挂载 pinia、router、element-plus。
  */
 getPlatformConfig(app).then(async () => {
   initStorage()

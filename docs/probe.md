@@ -98,11 +98,3 @@
 - 只关心链接是否还能下载到脚本本体。
 
 probe 是**可选项**，关闭时 lxhub 仍然是一个纯静态收录工具（行为与老版本一致）。
-
-## 设计参考
-
-- [XCQ0607/lxserver](https://github.com/XCQ0607/lxserver)（Apache-2.0）的
-  userApi 沙箱白名单（`globalThis.lx` 环境模拟、取歌参数的建立流程、inited 等待机制）；
-- lx-hunter 项目的「试听 + Range 校验 + 音频魔数」验证思路。
-
-本项目未直接引入上述代码，仅参考其实现思路，全部代码重写。

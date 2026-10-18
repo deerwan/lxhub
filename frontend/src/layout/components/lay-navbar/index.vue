@@ -49,7 +49,7 @@ function onCommand(command: string): void {
       </el-icon>
     </div>
 
-    <!-- 与 pure-admin 一致：移动端不渲染面包屑，避免窄屏挤压换行 -->
+    <!-- 移动端不渲染面包屑，避免窄屏挤压换行 -->
     <SidebarBreadCrumb v-if="device !== 'mobile'" />
 
     <div class="navbar-right">

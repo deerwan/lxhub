@@ -59,4 +59,4 @@ python3.12 -m venv .venv
 
 - [配置说明](configuration.md) — `config.json` 各字段
 - [配置 GitHub Token](github-token.md) — 提升收录覆盖面的关键
-- [部署方式](deployment.md) — Docker / GitHub Pages
+- [部署方式](deploy.md) — Docker / Railway

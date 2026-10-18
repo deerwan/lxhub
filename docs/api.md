@@ -18,4 +18,4 @@
 - `/api/sources` 会一并返回 `mirror_prefixes`，供前端渲染「加速前缀」开关；
 - 列表接口**不含**脚本文本，仅在 `/api/sources/{id}` 详情中返回前 6000 字符预览；
 - 任务进行中时，`/api/crawl` 和 `/api/check` 会返回 `409`；`/api/probe` 同样受此限制，且 busy 值可为 `probe`；
-- `/export.json` 供静态模式（GitHub Pages）读取，结构与上述列表一致。
+- `/export.json` 结构与上述列表一致，供 curl / 第三方工具消费全量数据（CLI 亦可用 `main.py export` 落盘）。

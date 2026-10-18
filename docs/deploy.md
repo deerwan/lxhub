@@ -1,6 +1,6 @@
 # 部署说明
 
-本项目是 FastAPI + SQLite 的自部署应用，内置后台定时爬取/复检任务。以下提供三种部署方式。
+本项目是 FastAPI + SQLite 的自部署应用，内置后台定时爬取/复检任务。以下提供两种部署方式。
 
 ## 0. 准备工作（必看）
 
@@ -44,19 +44,7 @@ Railway 支持从私有仓库拉取代码并基于 `Dockerfile` 自动部署。
 > 说明：`Dockerfile` 的启动命令只固定 `--host 0.0.0.0`，端口交给环境变量 `PORT` / `LXH_PORT`，
 > 因此 Railway 注入的 `PORT` 会自动生效，无需改代码。
 
-## 3. 只读静态展示（GitHub Pages，可选）
-
-若只想展示列表、不需要下载 / 导出 / 后台爬取：
-
-```bash
-python main.py export --out export.json   # 生成数据快照
-```
-
-启用仓库的 GitHub Pages（私有仓库的页面仅协作者可见），将 `index.html` 与 `export.json` 作为静态站点托管。
-
-限制：下载按钮、导出 ZIP、爬取等依赖后端的功能均不可用；页面为生成时的快照、不会自动更新。
-
-## 4. 注意事项
+## 3. 注意事项
 
 - **切勿把真实 `GITHUB_TOKEN` 提交进仓库**（即便是私有仓库）。只用 `.env` 或平台 Secrets。
   特别注意：`config.json` 目前被 git 跟踪，如果在其 `github_token` 字段填了真实 token 并提交，会泄露到仓库历史（协作者可见、撤销困难）。请始终保持 `config.json` 里的 token 为空，真实 token 只放 `.env` 或部署平台的 Secrets / 环境变量（`config.py` 已支持 `GITHUB_TOKEN` 环境变量覆盖，优先级最高）。
@@ -64,11 +52,10 @@ python main.py export --out export.json   # 生成数据快照
 - 公网暴露务必加 HTTPS 反代；token 仅存服务端，不暴露给前端。
 - 数据库文件 `data/lxhub.db` 需持久化卷，否则容器 / 实例重启数据归零。
 
-## 5. 发版与镜像部署（GitHub Actions）
+## 4. 发版与镜像部署（GitHub Actions）
 
-仓库已带两个工作流：
+仓库已带发版工作流：
 
-- `.github/workflows/scheduled-crawl.yml`：每日 UTC 01:00 自动爬取并生成 `export.json`、发布 GitHub Pages 静态站。爬取使用的是 Actions 自动注入的 `GITHUB_TOKEN`（短期、仅本仓库 scope），**不需要你提供 PAT**。
 - `.github/workflows/release.yml`：打 `v*` tag 后自动构建多架构（amd64/arm64）Docker 镜像、推送到 GitHub Container Registry (`ghcr.io/deerwan/lxhub`)，并创建 GitHub Release（自动生成变更说明）。
 
 发版流程：
@@ -89,7 +76,7 @@ docker pull ghcr.io/deerwan/lxhub:latest
 >
 > 若你希望镜像对外公开，需在 GitHub 的 Packages 设置里把该镜像设为 Public（或把仓库本身设为 Public）。
 
-## 6. 网页后台管理（拉镜像即用的配置方式）
+## 5. 网页后台管理（拉镜像即用的配置方式）
 
 不想改 `config.json`、也不想准备 `.env`？直接用网页后台：部署后打开网页 → 点「后台」（未登录会跳到 `/login`，如 `https://你的域名/login`）→ 输入账户名与密码登录 → 自动进入 `/admin` 后台（在线填写 GitHub Token / 关键词 / 种子仓库 / 爬取参数，并一键触发爬取、复检）。所有修改即时生效、持久化到数据卷（`data/config.override.json`），重启不丢。直接访问 `/admin` 而未登录会被重定向到 `/login`。
 

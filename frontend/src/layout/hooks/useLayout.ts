@@ -6,10 +6,7 @@ import { initStorage } from '@/utils/storage'
 import { routerArrays } from '@/layout/types'
 
 /**
- * 布局相关的响应式配置。
- *
- * `vue-pure-admin` 通过 `responsive-storage` 提供的 `$storage` 读写这些值，
- * 本项目改为直接由 `settings` store 持有，少一层依赖但用法保持一致。
+ * 布局相关的响应式配置，统一由 `settings` store 持有。
  */
 export function useLayout() {
   const layout = computed(() => useAppStoreHook().layout)

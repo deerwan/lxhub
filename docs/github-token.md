@@ -37,9 +37,10 @@
 
 ## 配置方式
 
-优先级：**进程环境变量 > `.env` 文件 > `config.json`**。
+优先级：**进程环境变量 > `.env` 文件 > `config.json`**（完整字段与环境变量对照见
+[配置说明](configuration.md)）。
 
-### 方式 A：`.env` 文件（推荐）
+### `.env` 文件（推荐）
 
 仓库已提供模板，复制后填入真实值：
 
@@ -50,38 +51,11 @@ cp .env.example .env
 
 `.env` 已被 `.gitignore` 忽略：既能持久生效（每次启动自动读取，不用重复 export），
 又不会进版本库。仓库里只提交不含真实值的 `.env.example`。
+Docker Compose 会读取宿主机的 `.env`，容器部署无需额外配置。
 
-### 方式 B：临时环境变量
-
-仅当前终端生效，适合临时验证：
-
-```bash
-export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-.venv/bin/python main.py serve
-```
-
-### 方式 C：写进 config.json
-
-```json
-{ "github_token": "ghp_xxxxxxxxxxxxxxxxxxxx" }
-```
-
-> ⚠️ **不推荐**：`config.json` **没有**被 `.gitignore` 忽略（Docker 构建需要 `COPY` 它）。
-> 一旦把 Token 填进去，`git add .` 就会把它提交并推送到远程，等于公开泄露。
-> 若确实要填，提交前务必确认该字段为空。**请优先用方式 A。**
-
-### 方式 D：Docker Compose
-
-`docker-compose.yml` 会读取宿主机的 `.env` 或环境变量：
-
-```bash
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx docker compose up -d --build
-```
-
-### 方式 E：GitHub Actions
-
-无需任何配置。`.github/workflows/scheduled-crawl.yml` 直接使用仓库自动注入的
-`secrets.GITHUB_TOKEN`，配额问题自动解除。
+> ⚠️ 也可以临时 `export GITHUB_TOKEN=...` 或写进 `config.json` 应急，但 `config.json`
+> 被 git 跟踪（Docker 构建需要 `COPY` 它），填入真实 Token 一旦提交等于泄露——
+> 请始终保持 `config.json` 里该字段为空，优先用 `.env` 或平台环境变量注入。
 
 ## 验证是否生效
 

@@ -34,8 +34,3 @@
 
 前提确认运行环境装有 Node ≥ 20（`node -v`；官方 Docker 镜像已内置，源码裸机部署需自行安装）。
 手动点「沙箱实测」按钮或 `python main.py probe --yes` 不受该开关限制。
-
-## 静态模式下按钮是灰的？
-
-正常现象。GitHub Pages 静态站没有后端，页面回退读取 `export.json`，
-爬取 / 复检按钮会禁用，数据由 GitHub Actions 定时更新。

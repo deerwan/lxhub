@@ -17,7 +17,7 @@ import SourceDetail from '@/components/SourceDetail.vue'
 defineOptions({ name: 'Welcome' })
 
 const router = useRouter()
-const { rows, staticMode, loading, q, statusFilter, typeFilter, load, onSortChange, openDetail } =
+const { rows, loading, q, statusFilter, typeFilter, load, onSortChange, openDetail } =
   useSources()
 const { stats, loadStats } = useStats()
 const { toggleDark } = useDataThemeChange()
@@ -69,8 +69,8 @@ onMounted(() => {
             <el-icon><component :is="darkMode ? Sunny : Moon" /></el-icon>
           </el-button>
         </el-tooltip>
-        <!-- 静态展示模式（GitHub Pages）没有后端，隐藏后台入口避免点进 404 -->
-        <el-tooltip v-if="!staticMode" content="后台管理" placement="bottom">
+        <!-- 后台管理入口 -->
+        <el-tooltip content="后台管理" placement="bottom">
           <el-button text circle @click="router.push('/admin')">
             <el-icon><UserFilled /></el-icon>
           </el-button>
@@ -86,7 +86,6 @@ onMounted(() => {
             聚合公开渠道发布的洛雪自定义音源链接 · 只索引可达性与元数据，不提供任何音乐内容
           </div>
         </div>
-        <div v-if="staticMode" class="muted sm">静态模式：数据来自 export.json</div>
       </div>
 
       <StatsOverview v-bind="stats" />

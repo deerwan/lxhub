@@ -10,7 +10,7 @@ import SourceDetail from '@/components/SourceDetail.vue'
 
 defineOptions({ name: 'AdminSources' })
 
-const { rows, staticMode, loading, q, statusFilter, typeFilter, load, onSortChange, openDetail } =
+const { rows, loading, q, statusFilter, typeFilter, load, onSortChange, openDetail } =
   useSources()
 
 const dlgVisible = ref(false)
@@ -48,15 +48,6 @@ onMounted(() => void load())
 
 <template>
   <div>
-    <el-alert
-      v-if="staticMode"
-      type="info"
-      show-icon
-      :closable="false"
-      title="静态模式：接口不可用，数据来自 export.json"
-      style="margin-bottom: 14px"
-    />
-
     <SourceToolbar
       v-model:q="q"
       v-model:status="statusFilter"

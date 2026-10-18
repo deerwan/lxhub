@@ -20,7 +20,7 @@ export const formatToken = (token: string): string => `Bearer ${token}`
 /**
  * 读取登录态，未登录或已过期时返回空对象。
  *
- * 注意：这里刻意不依赖 `pinia`（`vue-pure-admin` 里 `setToken` 会写 store），
+ * 注意：这里刻意不依赖 `pinia`（登录态只读写本地存储），
  * 以避免 `utils/auth -> store -> api -> utils/http -> utils/auth` 的循环依赖。
  * 用户信息统一由 `user` store 从本地存储初始化。
  */

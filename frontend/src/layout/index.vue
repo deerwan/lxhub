@@ -89,7 +89,7 @@ onMounted(() => {
 })
 
 /**
- * 与 `vue-pure-admin` 一致：把导航模式写到 `body[layout]`，
+ * 把导航模式写到 `body[layout]`：
  * 侧边栏宽度等样式由 `body[layout="vertical"]` 决定，便于后续扩展横向 / 混合布局
  */
 watch(

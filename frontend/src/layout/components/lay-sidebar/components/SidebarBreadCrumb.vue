@@ -6,7 +6,7 @@ import { findRouteByPath, getParentPaths } from '@/router/utils'
 import { useMultiTagsStoreHook } from '@/store/modules/multiTags'
 
 /**
- * 顶栏面包屑，逻辑对齐 `vue-pure-admin` 的 `SidebarBreadCrumb`：
+ * 顶栏面包屑逻辑：
  * 优先按 `query` / `params` 命中标签页，否则按 path 查路由，再逐级向上取父级。
  */
 defineOptions({ name: 'SidebarBreadCrumb' })

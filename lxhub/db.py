@@ -521,10 +521,9 @@ class DB:
         return {k: int(v) for k, v in d.items()}
 
     def export(self, mirror_prefixes: list | None = None) -> dict:
-        """导出全量数据。
+        """导出全量数据（供 /export.json 接口与 CLI `main.py export` 使用）。
 
-        mirror_prefixes 会随数据一起下发，静态模式（GitHub Pages）的前端
-        依赖它渲染「加速前缀」开关。
+        mirror_prefixes 会随数据一起下发，便于第三方工具按加速前缀还原链接。
         """
         return {
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),

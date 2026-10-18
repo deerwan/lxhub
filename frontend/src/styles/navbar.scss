@@ -2,7 +2,7 @@
   display: flex;
   align-items: center;
   height: 48px;
-  /* 与 pure-admin 一致：顶栏自身不留内边距，由各按钮自带 padding 形成点击区，两端才能贴边 */
+  /* 顶栏自身不留内边距，由各按钮自带 padding 形成点击区，两端才能贴边 */
   padding: 0;
   overflow: hidden;
   background: var(--el-bg-color);
